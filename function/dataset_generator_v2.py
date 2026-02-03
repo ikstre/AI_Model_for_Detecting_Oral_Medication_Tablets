@@ -529,7 +529,7 @@ if __name__ == "__main__":
         label_root=r"E:\download\label\단일경구약제_5000종\TL_81_단일",
         image_root=r"E:\download\image\단일경구약제_5000종\TS_81_단일",
         output_dir=r"E:\download\datasets",
-        dataset_name="TS_10_single",
+        dataset_name="TS_81_single",
         dataset_type="single",
         exclude_index_images=False,
         max_workers=4  # CPU 코어 수에 맞춰 조정
