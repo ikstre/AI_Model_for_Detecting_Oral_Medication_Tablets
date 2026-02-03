@@ -413,6 +413,9 @@ def build_train_like_image_id_map(file_names, start_id=1):
         cur += 1
     return m
 
+import re
+from pathlib import Path
+
 def parse_test_image_id(path, mode="train_like", seq_id=None, id_map=None, start_id=1):
     path = Path(path)
     fn = path.name
@@ -425,6 +428,14 @@ def parse_test_image_id(path, mode="train_like", seq_id=None, id_map=None, start
     if mode == "sequential":
         return int(seq_id)
 
+    # ✅ 명시적으로 추가 (기존 else 동작과 동일)
+    if mode == "digits":
+        nums = re.findall(r"\d+", path.stem)
+        if not nums:
+            return _safe_int(path.stem) or int(seq_id)
+        return int("".join(nums))
+
+    # 기존 코드 호환: digits 외 다른 문자열도 digits처럼 처리하고 싶다면
     nums = re.findall(r"\d+", path.stem)
     if not nums:
         return _safe_int(path.stem) or int(seq_id)
