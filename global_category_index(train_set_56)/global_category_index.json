@@ -1,0 +1,694 @@
+{
+  "metadata": {
+    "total_categories": 56,
+    "total_annotations": 763,
+    "total_datasets": 1,
+    "index_range": "0-55"
+  },
+  "category_map": {
+    "1900": {
+      "category_id": 1900,
+      "category_name": "보령부스파정 5mg",
+      "dl_idx": "1900",
+      "count": 15,
+      "datasets": {
+        "train_annotations": 15
+      }
+    },
+    "16548": {
+      "category_id": 16548,
+      "category_name": "가바토파정 100mg",
+      "dl_idx": "16548",
+      "count": 18,
+      "datasets": {
+        "train_annotations": 18
+      }
+    },
+    "19607": {
+      "category_id": 19607,
+      "category_name": "스토가정 10mg",
+      "dl_idx": "19607",
+      "count": 6,
+      "datasets": {
+        "train_annotations": 6
+      }
+    },
+    "29451": {
+      "category_id": 29451,
+      "category_name": "레일라정",
+      "dl_idx": "29451",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "33009": {
+      "category_id": 33009,
+      "category_name": "신바로정",
+      "dl_idx": "33009",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "21771": {
+      "category_id": 21771,
+      "category_name": "라비에트정 20mg",
+      "dl_idx": "21771",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "27926": {
+      "category_id": 27926,
+      "category_name": "울트라셋이알서방정",
+      "dl_idx": "27926",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "24850": {
+      "category_id": 24850,
+      "category_name": "놀텍정 10mg",
+      "dl_idx": "24850",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "29345": {
+      "category_id": 29345,
+      "category_name": "비모보정 500/20mg",
+      "dl_idx": "29345",
+      "count": 6,
+      "datasets": {
+        "train_annotations": 6
+      }
+    },
+    "16551": {
+      "category_id": 16551,
+      "category_name": "동아가바펜틴정 800mg",
+      "dl_idx": "16551",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "33208": {
+      "category_id": 33208,
+      "category_name": "에스원엠프정 20mg",
+      "dl_idx": "33208",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "2483": {
+      "category_id": 2483,
+      "category_name": "뮤테란캡슐 100mg",
+      "dl_idx": "2483",
+      "count": 9,
+      "datasets": {
+        "train_annotations": 9
+      }
+    },
+    "3743": {
+      "category_id": 3743,
+      "category_name": "알드린정",
+      "dl_idx": "3743",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "12778": {
+      "category_id": 12778,
+      "category_name": "다보타민큐정 10mg/병",
+      "dl_idx": "12778",
+      "count": 6,
+      "datasets": {
+        "train_annotations": 6
+      }
+    },
+    "13395": {
+      "category_id": 13395,
+      "category_name": "써스펜8시간이알서방정 650mg",
+      "dl_idx": "13395",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "12081": {
+      "category_id": 12081,
+      "category_name": "리렉스펜정 300mg/PTP",
+      "dl_idx": "12081",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "25438": {
+      "category_id": 25438,
+      "category_name": "큐시드정 31.5mg/PTP",
+      "dl_idx": "25438",
+      "count": 6,
+      "datasets": {
+        "train_annotations": 6
+      }
+    },
+    "19552": {
+      "category_id": 19552,
+      "category_name": "트루비타정 60mg/병",
+      "dl_idx": "19552",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "22362": {
+      "category_id": 22362,
+      "category_name": "맥시부펜이알정 300mg",
+      "dl_idx": "22362",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "3351": {
+      "category_id": 3351,
+      "category_name": "일양하이트린정 2mg",
+      "dl_idx": "3351",
+      "count": 153,
+      "datasets": {
+        "train_annotations": 153
+      }
+    },
+    "3832": {
+      "category_id": 3832,
+      "category_name": "뉴로메드정(옥시라세탐)",
+      "dl_idx": "3832",
+      "count": 20,
+      "datasets": {
+        "train_annotations": 20
+      }
+    },
+    "16232": {
+      "category_id": 16232,
+      "category_name": "리피토정 20mg",
+      "dl_idx": "16232",
+      "count": 21,
+      "datasets": {
+        "train_annotations": 21
+      }
+    },
+    "16262": {
+      "category_id": 16262,
+      "category_name": "크레스토정 20mg",
+      "dl_idx": "16262",
+      "count": 23,
+      "datasets": {
+        "train_annotations": 23
+      }
+    },
+    "16688": {
+      "category_id": 16688,
+      "category_name": "오마코연질캡슐(오메가-3-산에틸에스테르90)",
+      "dl_idx": "16688",
+      "count": 8,
+      "datasets": {
+        "train_annotations": 8
+      }
+    },
+    "20238": {
+      "category_id": 20238,
+      "category_name": "플라빅스정 75mg",
+      "dl_idx": "20238",
+      "count": 20,
+      "datasets": {
+        "train_annotations": 20
+      }
+    },
+    "21325": {
+      "category_id": 21325,
+      "category_name": "아토르바정 10mg",
+      "dl_idx": "21325",
+      "count": 22,
+      "datasets": {
+        "train_annotations": 22
+      }
+    },
+    "22074": {
+      "category_id": 22074,
+      "category_name": "리피로우정 20mg",
+      "dl_idx": "22074",
+      "count": 16,
+      "datasets": {
+        "train_annotations": 16
+      }
+    },
+    "29667": {
+      "category_id": 29667,
+      "category_name": "리바로정 4mg",
+      "dl_idx": "29667",
+      "count": 18,
+      "datasets": {
+        "train_annotations": 18
+      }
+    },
+    "35206": {
+      "category_id": 35206,
+      "category_name": "아토젯정 10/40mg",
+      "dl_idx": "35206",
+      "count": 37,
+      "datasets": {
+        "train_annotations": 37
+      }
+    },
+    "36637": {
+      "category_id": 36637,
+      "category_name": "로수젯정10/5밀리그램",
+      "dl_idx": "36637",
+      "count": 19,
+      "datasets": {
+        "train_annotations": 19
+      }
+    },
+    "38162": {
+      "category_id": 38162,
+      "category_name": "로수바미브정 10/20mg",
+      "dl_idx": "38162",
+      "count": 18,
+      "datasets": {
+        "train_annotations": 18
+      }
+    },
+    "13900": {
+      "category_id": 13900,
+      "category_name": "에빅사정(메만틴염산염)(비매품)",
+      "dl_idx": "13900",
+      "count": 15,
+      "datasets": {
+        "train_annotations": 15
+      }
+    },
+    "18357": {
+      "category_id": 18357,
+      "category_name": "종근당글리아티린연질캡슐(콜린알포세레이트) ",
+      "dl_idx": "18357",
+      "count": 13,
+      "datasets": {
+        "train_annotations": 13
+      }
+    },
+    "19232": {
+      "category_id": 19232,
+      "category_name": "콜리네이트연질캡슐 400mg",
+      "dl_idx": "19232",
+      "count": 17,
+      "datasets": {
+        "train_annotations": 17
+      }
+    },
+    "20014": {
+      "category_id": 20014,
+      "category_name": "마도파정",
+      "dl_idx": "20014",
+      "count": 16,
+      "datasets": {
+        "train_annotations": 16
+      }
+    },
+    "31863": {
+      "category_id": 31863,
+      "category_name": "아질렉트정(라사길린메실산염)",
+      "dl_idx": "31863",
+      "count": 12,
+      "datasets": {
+        "train_annotations": 12
+      }
+    },
+    "32310": {
+      "category_id": 32310,
+      "category_name": "글리아타민연질캡슐",
+      "dl_idx": "32310",
+      "count": 14,
+      "datasets": {
+        "train_annotations": 14
+      }
+    },
+    "33880": {
+      "category_id": 33880,
+      "category_name": "글리틴정(콜린알포세레이트)",
+      "dl_idx": "33880",
+      "count": 16,
+      "datasets": {
+        "train_annotations": 16
+      }
+    },
+    "41768": {
+      "category_id": 41768,
+      "category_name": "카발린캡슐 25mg",
+      "dl_idx": "41768",
+      "count": 16,
+      "datasets": {
+        "train_annotations": 16
+      }
+    },
+    "18147": {
+      "category_id": 18147,
+      "category_name": "리리카캡슐 150mg",
+      "dl_idx": "18147",
+      "count": 15,
+      "datasets": {
+        "train_annotations": 15
+      }
+    },
+    "3483": {
+      "category_id": 3483,
+      "category_name": "기넥신에프정(은행엽엑스)(수출용)",
+      "dl_idx": "3483",
+      "count": 45,
+      "datasets": {
+        "train_annotations": 45
+      }
+    },
+    "20877": {
+      "category_id": 20877,
+      "category_name": "엑스포지정 5/160mg",
+      "dl_idx": "20877",
+      "count": 12,
+      "datasets": {
+        "train_annotations": 12
+      }
+    },
+    "30308": {
+      "category_id": 30308,
+      "category_name": "트라젠타듀오정 2.5/850mg",
+      "dl_idx": "30308",
+      "count": 9,
+      "datasets": {
+        "train_annotations": 9
+      }
+    },
+    "34597": {
+      "category_id": 34597,
+      "category_name": "제미메트서방정 50/1000mg",
+      "dl_idx": "34597",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "22347": {
+      "category_id": 22347,
+      "category_name": "자누비아정 50mg",
+      "dl_idx": "22347",
+      "count": 9,
+      "datasets": {
+        "train_annotations": 9
+      }
+    },
+    "25469": {
+      "category_id": 25469,
+      "category_name": "아모잘탄정 5/100mg",
+      "dl_idx": "25469",
+      "count": 12,
+      "datasets": {
+        "train_annotations": 12
+      }
+    },
+    "19861": {
+      "category_id": 19861,
+      "category_name": "노바스크정 5mg",
+      "dl_idx": "19861",
+      "count": 6,
+      "datasets": {
+        "train_annotations": 6
+      }
+    },
+    "28763": {
+      "category_id": 28763,
+      "category_name": "트라젠타정(리나글립틴)",
+      "dl_idx": "28763",
+      "count": 9,
+      "datasets": {
+        "train_annotations": 9
+      }
+    },
+    "27733": {
+      "category_id": 27733,
+      "category_name": "트윈스타정 40/5mg",
+      "dl_idx": "27733",
+      "count": 12,
+      "datasets": {
+        "train_annotations": 12
+      }
+    },
+    "25367": {
+      "category_id": 25367,
+      "category_name": "자누메트정 50/850mg",
+      "dl_idx": "25367",
+      "count": 12,
+      "datasets": {
+        "train_annotations": 12
+      }
+    },
+    "31885": {
+      "category_id": 31885,
+      "category_name": "자누메트엑스알서방정 100/1000mg",
+      "dl_idx": "31885",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "27777": {
+      "category_id": 27777,
+      "category_name": "카나브정 60mg",
+      "dl_idx": "27777",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "3544": {
+      "category_id": 3544,
+      "category_name": "무코스타정(레바미피드)(비매품)",
+      "dl_idx": "3544",
+      "count": 6,
+      "datasets": {
+        "train_annotations": 6
+      }
+    },
+    "4543": {
+      "category_id": 4543,
+      "category_name": "에어탈정(아세클로페낙)",
+      "dl_idx": "4543",
+      "count": 5,
+      "datasets": {
+        "train_annotations": 5
+      }
+    },
+    "12247": {
+      "category_id": 12247,
+      "category_name": "아빌리파이정 10mg",
+      "dl_idx": "12247",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    },
+    "27993": {
+      "category_id": 27993,
+      "category_name": "졸로푸트정 100mg",
+      "dl_idx": "27993",
+      "count": 3,
+      "datasets": {
+        "train_annotations": 3
+      }
+    }
+  },
+  "index_to_id": {
+    "0": 1900,
+    "1": 2483,
+    "2": 3351,
+    "3": 3483,
+    "4": 3544,
+    "5": 3743,
+    "6": 3832,
+    "7": 4543,
+    "8": 12081,
+    "9": 12247,
+    "10": 12778,
+    "11": 13395,
+    "12": 13900,
+    "13": 16232,
+    "14": 16262,
+    "15": 16548,
+    "16": 16551,
+    "17": 16688,
+    "18": 18147,
+    "19": 18357,
+    "20": 19232,
+    "21": 19552,
+    "22": 19607,
+    "23": 19861,
+    "24": 20014,
+    "25": 20238,
+    "26": 20877,
+    "27": 21325,
+    "28": 21771,
+    "29": 22074,
+    "30": 22347,
+    "31": 22362,
+    "32": 24850,
+    "33": 25367,
+    "34": 25438,
+    "35": 25469,
+    "36": 27733,
+    "37": 27777,
+    "38": 27926,
+    "39": 27993,
+    "40": 28763,
+    "41": 29345,
+    "42": 29451,
+    "43": 29667,
+    "44": 30308,
+    "45": 31863,
+    "46": 31885,
+    "47": 32310,
+    "48": 33009,
+    "49": 33208,
+    "50": 33880,
+    "51": 34597,
+    "52": 35206,
+    "53": 36637,
+    "54": 38162,
+    "55": 41768
+  },
+  "id_to_index": {
+    "1900": 0,
+    "2483": 1,
+    "3351": 2,
+    "3483": 3,
+    "3544": 4,
+    "3743": 5,
+    "3832": 6,
+    "4543": 7,
+    "12081": 8,
+    "12247": 9,
+    "12778": 10,
+    "13395": 11,
+    "13900": 12,
+    "16232": 13,
+    "16262": 14,
+    "16548": 15,
+    "16551": 16,
+    "16688": 17,
+    "18147": 18,
+    "18357": 19,
+    "19232": 20,
+    "19552": 21,
+    "19607": 22,
+    "19861": 23,
+    "20014": 24,
+    "20238": 25,
+    "20877": 26,
+    "21325": 27,
+    "21771": 28,
+    "22074": 29,
+    "22347": 30,
+    "22362": 31,
+    "24850": 32,
+    "25367": 33,
+    "25438": 34,
+    "25469": 35,
+    "27733": 36,
+    "27777": 37,
+    "27926": 38,
+    "27993": 39,
+    "28763": 40,
+    "29345": 41,
+    "29451": 42,
+    "29667": 43,
+    "30308": 44,
+    "31863": 45,
+    "31885": 46,
+    "32310": 47,
+    "33009": 48,
+    "33208": 49,
+    "33880": 50,
+    "34597": 51,
+    "35206": 52,
+    "36637": 53,
+    "38162": 54,
+    "41768": 55
+  },
+  "dataset_stats": {
+    "train_annotations": {
+      "total_annotations": 763,
+      "unique_categories": 56,
+      "category_counts": {
+        "1900": 15,
+        "16548": 18,
+        "19607": 6,
+        "29451": 3,
+        "33009": 3,
+        "21771": 3,
+        "27926": 3,
+        "24850": 3,
+        "29345": 6,
+        "16551": 3,
+        "33208": 3,
+        "2483": 9,
+        "3743": 3,
+        "12778": 6,
+        "13395": 3,
+        "12081": 3,
+        "25438": 6,
+        "19552": 3,
+        "22362": 3,
+        "3351": 153,
+        "3832": 20,
+        "16232": 21,
+        "16262": 23,
+        "16688": 8,
+        "20238": 20,
+        "21325": 22,
+        "22074": 16,
+        "29667": 18,
+        "35206": 37,
+        "36637": 19,
+        "38162": 18,
+        "13900": 15,
+        "18357": 13,
+        "19232": 17,
+        "20014": 16,
+        "31863": 12,
+        "32310": 14,
+        "33880": 16,
+        "41768": 16,
+        "18147": 15,
+        "3483": 45,
+        "20877": 12,
+        "30308": 9,
+        "34597": 3,
+        "22347": 9,
+        "25469": 12,
+        "19861": 6,
+        "28763": 9,
+        "27733": 12,
+        "25367": 12,
+        "31885": 3,
+        "27777": 3,
+        "3544": 6,
+        "4543": 5,
+        "12247": 3,
+        "27993": 3
+      }
+    }
+  }
+}
