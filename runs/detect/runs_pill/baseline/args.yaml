@@ -5,13 +5,13 @@ data: yolo_pill_ds\dataset.yaml
 epochs: 10
 time: null
 patience: 100
-batch: 4
+batch: -1
 imgsz: 640
 save: true
 save_period: -1
 cache: false
 device: '0'
-workers: 8
+workers: 0
 project: runs_pill
 name: baseline
 exist_ok: true
