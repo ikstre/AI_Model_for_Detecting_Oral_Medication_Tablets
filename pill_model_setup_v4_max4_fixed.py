@@ -50,7 +50,7 @@ class CFG:
     # -------------------------
     imgsz = 640
     epochs = 100
-    batch = 16
+    batch = 8
     lr0 = 1e-3
     weight_decay = 1e-4
     optimizer = "AdamW"
@@ -81,10 +81,7 @@ class CFG:
     # 불균형 보정(옵션): train.txt에 추가로 반복 샘플링할 비율
     # - 예: 0.5면 train 이미지 수의 50%만큼을 추가로 더 뽑아서 train.txt에 append
     # -------------------------
-    balance_enable = False
-    balance_extra_ratio = 0.0
-    balance_power = 17.0  # weight^power (큰 값일수록 소수 클래스 oversample 강화)
-
+    balance_enable = True
     # -------------------------
     # Optuna
     # -------------------------
