@@ -49,7 +49,7 @@ class CFG:
     # 학습 기본 하이퍼파라미터
     # -------------------------
     imgsz = 640
-    epochs = 100
+    epochs = 300
     batch = 8
     lr0 = 1e-3
     weight_decay = 1e-4
