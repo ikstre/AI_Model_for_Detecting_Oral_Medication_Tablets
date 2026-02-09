@@ -19,6 +19,7 @@ class DatasetConfig:
     image_root: str
     output_dir: str
     dataset_name: str
+    gci_path: str
     dataset_type: str = 'combination'
     exclude_index_images: bool = True
     image_width: int = 976
@@ -69,7 +70,8 @@ class AnnotationProcessor:
     
     @staticmethod
     def parse_single_json(json_path: Path, config: DatasetConfig, 
-                         image_index: Dict[str, str]) -> Dict[str, Any]:
+                      image_index: Dict[str, str],
+                      allowed_ids: set) -> Dict[str, Any]:
         """단일 JSON 파일 파싱 (병렬 처리용 정적 메서드)"""
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
@@ -95,8 +97,18 @@ class AnnotationProcessor:
                     'error_type': 'missing_bbox',
                     'data': {'file_name': file_name, 'json_path': str(json_path)}
                 }
-            
+        
+
             x, y, w, h = bbox
+            area = annotation.get('area')
+
+            # 2.5 bbox 면적 불일치 제거
+            if area is not None and abs(area - (w * h)) > 1:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'area_mismatch',
+                    'data': {'file_name': file_name, 'bbox': bbox, 'area': area}
+                }
             
             # 3. bbox 경계 검증
             if (x < 0 or y < 0 or 
@@ -130,6 +142,15 @@ class AnnotationProcessor:
                         'dl_idx': dl_idx,
                         'category_id': category_id
                     }
+                }
+        
+
+            # 57개 클래스 필터
+            if final_category_id not in allowed_ids:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'not_in_train57',
+                    'data': {'file_name': file_name, 'category_id': final_category_id}
                 }
             
             # 5. 이미지 경로 확인
@@ -215,6 +236,7 @@ class DataExporter:
     
     def __init__(self, output_path: Path):
         self.output_path = output_path
+        self.config = config
         self.output_path.mkdir(parents=True, exist_ok=True)
     
     def export_csv(self, df: pd.DataFrame, category_map: pd.DataFrame, 
@@ -264,10 +286,10 @@ class DataExporter:
         images_dir.mkdir(parents=True, exist_ok=True)
         labels_dir.mkdir(parents=True, exist_ok=True)
         
-        category_to_idx = {
-            row['category_id']: idx 
-            for idx, row in category_map.iterrows()
-        }
+        with open(self.config.gci_path, 'r', encoding='utf-8') as f:
+            gci = json.load(f)
+        id_to_index = {int(k): v for k, v in gci['id_to_index'].items()}
+        category_to_idx = id_to_index
         
         for file_name, group in df.groupby('file_name'):
             # 이미지 복사
@@ -314,6 +336,11 @@ class DatasetGenerator:
     def __init__(self, config: DatasetConfig):
         self.config = config
         self.output_path = Path(config.output_dir) / config.dataset_name
+
+
+        with open(config.gci_path, 'r', encoding='utf-8') as f:
+            gci = json.load(f)
+        self.allowed_ids = set(map(int, gci['id_to_index'].keys()))
         
         # 로깅 설정
         logging.basicConfig(
@@ -324,7 +351,7 @@ class DatasetGenerator:
         
         # 컴포넌트 초기화
         self.image_indexer = ImageIndexer(config.image_root)
-        self.exporter = DataExporter(self.output_path)
+        self.exporter = DataExporter(self.output_path, config)
     
     def generate(self) -> Dict[str, Any]:
         """전체 데이터셋 생성 프로세스"""
@@ -343,7 +370,7 @@ class DatasetGenerator:
             
             # 3. 병렬 처리로 어노테이션 파싱
             validation_result = self._process_annotations_parallel(
-                json_files, image_index
+                json_files, image_index, self.allowed_ids
             )
             
             # 4. DataFrame 생성 및 중복 제거
@@ -377,7 +404,7 @@ class DatasetGenerator:
         return json_files
     
     def _process_annotations_parallel(self, json_files: List[Path], 
-                                    image_index: Dict[str, str]) -> ValidationResult:
+                                    image_index: Dict[str, str], allowed_ids) -> ValidationResult:
         """JSON 어노테이션 병렬 처리"""
         self.logger.info(f"\n[2단계] 어노테이션 병렬 처리 (워커: {self.config.max_workers}개)...")
         
@@ -390,7 +417,7 @@ class DatasetGenerator:
             futures = {
                 executor.submit(
                     AnnotationProcessor.parse_single_json,
-                    json_file, self.config, image_index
+                    json_file, self.config, image_index, allowed_ids
                 ): json_file 
                 for json_file in json_files
             }
@@ -526,12 +553,13 @@ if __name__ == "__main__":
     
     # 설정 생성
     config = DatasetConfig(
-        label_root=r"E:\download\sprint_ai_project1_data\train_annotations",
-        image_root=r"E:\download\sprint_ai_project1_data\train_images",
+        label_root=r"E:\download\label_aug",
+        image_root=r"E:\download\image_aug",
         output_dir=r"E:\download\datasets",
-        dataset_name="original_data",
+        dataset_name="train_plus_extra",
         dataset_type="combination",
-        exclude_index_images=False,
+        gci_path=r"E:\download\gci_57.json",
+        exclude_index_images=True,
         max_workers=4  # CPU 코어 수에 맞춰 조정
     )
     

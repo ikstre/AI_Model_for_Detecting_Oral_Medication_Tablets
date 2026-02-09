@@ -4,7 +4,7 @@ import time
 import shutil
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 from dataclasses import dataclass, field
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from collections import defaultdict
@@ -19,6 +19,7 @@ class DatasetConfig:
     image_root: str
     output_dir: str
     dataset_name: str
+    gci_path: str
     dataset_type: str = 'combination'
     exclude_index_images: bool = True
     image_width: int = 976
@@ -68,105 +69,213 @@ class AnnotationProcessor:
     """JSON 어노테이션 처리"""
     
     @staticmethod
-    def parse_single_json(json_path: Path, config: DatasetConfig, 
-                         image_index: Dict[str, str]) -> Dict[str, Any]:
-        """단일 JSON 파일 파싱 (병렬 처리용 정적 메서드)"""
+    def parse_single_json(
+        json_path: Path,
+        config: DatasetConfig,
+        image_index: Dict[str, str],
+        allowed_ids: Set[int],
+    ) -> Dict[str, Any]:
+        """단일 JSON 파일 파싱 (병렬 처리용 정적 메서드)
+
+        - 카테고리 ID 결정 규칙
+          1) 기본적으로 img_meta['dl_idx']를 우선 사용
+          2) 단, 추가 데이터에서는 dl_idx가 '실제 카테고리ID - 1'로 들어올 수 있으므로
+             (dl_idx + 1)이 allowed_ids에 있으면 +1 보정해서 사용
+          3) dl_idx가 없으면 annotation['category_id']를 사용 (가능하면 동일 보정 로직 적용)
+
+        - 필터링
+          allowed_ids(=gci_57.json의 id_to_index 키 집합)에 없는 클래스는 제거
+
+        - 품질 검사
+          1) bbox 존재/형식
+          2) bbox 경계 이탈
+          3) bbox 면적(w*h)과 annotation['area'] 불일치 제거
+        """
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             img_meta = data['images'][0]
             annotation = data['annotations'][0]
-            file_name = img_meta['file_name']
-            
-            # 1. _index 파일 필터링
+            file_name = img_meta.get('file_name')
+
+            if not file_name:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'missing_filename',
+                    'data': {'json_path': str(json_path)},
+                }
+
+            # 1) _index 파일 필터링
             if config.exclude_index_images and '_index' in file_name:
                 return {
                     'status': 'invalid',
                     'error_type': 'is_index_file',
-                    'data': {'file_name': file_name, 'json_path': str(json_path)}
+                    'data': {'file_name': file_name, 'json_path': str(json_path)},
                 }
-            
-            # 2. bbox 검증
+
+            # 2) bbox 검증
             bbox = annotation.get('bbox')
             if not bbox or len(bbox) != 4:
                 return {
                     'status': 'invalid',
                     'error_type': 'missing_bbox',
-                    'data': {'file_name': file_name, 'json_path': str(json_path)}
+                    'data': {'file_name': file_name, 'json_path': str(json_path)},
                 }
-            
-            x, y, w, h = bbox
-            
-            # 3. bbox 경계 검증
-            if (x < 0 or y < 0 or 
-                x + w > config.image_width or 
-                y + h > config.image_height):
+
+            try:
+                x, y, w, h = map(float, bbox)
+            except Exception:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'invalid_bbox_format',
+                    'data': {'file_name': file_name, 'bbox': bbox, 'json_path': str(json_path)},
+                }
+
+            # 음수/0 크기 방지(너무 엄격하면 w/h==0도 걸러짐)
+            if w <= 0 or h <= 0:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'invalid_bbox_size',
+                    'data': {'file_name': file_name, 'bbox': [x, y, w, h], 'json_path': str(json_path)},
+                }
+
+            # 2.5) bbox 면적 불일치 제거
+            area = annotation.get('area')
+            if area is not None:
+                try:
+                    area_val = float(area)
+                    wh = w * h
+                    # 정수 반올림/부동소수 오차 감안: 1px^2 또는 0.5% 중 큰 값 허용
+                    tol = max(1.0, wh * 0.005)
+                    if abs(area_val - wh) > tol:
+                        return {
+                            'status': 'invalid',
+                            'error_type': 'area_mismatch',
+                            'data': {
+                                'file_name': file_name,
+                                'bbox': [x, y, w, h],
+                                'area': area_val,
+                                'w*h': wh,
+                                'tol': tol,
+                                'json_path': str(json_path),
+                            },
+                        }
+                except Exception:
+                    return {
+                        'status': 'invalid',
+                        'error_type': 'invalid_area',
+                        'data': {'file_name': file_name, 'area': area, 'json_path': str(json_path)},
+                    }
+
+            # 3) bbox 경계 검증
+            if (
+                x < 0
+                or y < 0
+                or x + w > config.image_width
+                or y + h > config.image_height
+            ):
                 return {
                     'status': 'invalid',
                     'error_type': 'out_of_bounds',
                     'data': {
                         'file_name': file_name,
-                        'bbox': bbox,
-                        'overflow_x': max(0, x + w - config.image_width),
-                        'overflow_y': max(0, y + h - config.image_height)
-                    }
+                        'bbox': [x, y, w, h],
+                        'overflow_x': max(0.0, x + w - config.image_width),
+                        'overflow_y': max(0.0, y + h - config.image_height),
+                        'json_path': str(json_path),
+                    },
                 }
-            
-            # 4. 카테고리 ID 추출
+
+            # 4) 카테고리 ID 추출 + (추가데이터 -1) 보정
+            def _pick_and_fix(raw: Any) -> Optional[int]:
+                if raw is None:
+                    return None
+                s = str(raw).strip()
+                if not s:
+                    return None
+                try:
+                    v = int(s)
+                except Exception:
+                    return None
+
+                # 우선 v 그대로
+                if v in allowed_ids:
+                    return v
+                # 추가데이터는 -1로 들어온다 -> +1 보정
+                if (v + 1) in allowed_ids:
+                    return v + 1
+                return v  # 일단 반환(아래에서 allowed_ids 필터로 걸러짐)
+
             dl_idx = img_meta.get('dl_idx')
             category_id = annotation.get('category_id')
-            
-            if dl_idx and str(dl_idx).strip():
-                final_category_id = int(dl_idx)
-            elif category_id is not None:
-                final_category_id = int(category_id)
-            else:
+
+            final_category_id = _pick_and_fix(dl_idx)
+            if final_category_id is None:
+                final_category_id = _pick_and_fix(category_id)
+
+            if final_category_id is None:
                 return {
                     'status': 'invalid',
                     'error_type': 'invalid_category',
                     'data': {
                         'file_name': file_name,
                         'dl_idx': dl_idx,
-                        'category_id': category_id
-                    }
+                        'category_id': category_id,
+                        'json_path': str(json_path),
+                    },
                 }
-            
-            # 5. 이미지 경로 확인
+
+            # 57개 클래스 필터
+            if final_category_id not in allowed_ids:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'not_in_train57',
+                    'data': {
+                        'file_name': file_name,
+                        'category_id': final_category_id,
+                        'dl_idx': dl_idx,
+                        'orig_category_id': category_id,
+                        'json_path': str(json_path),
+                    },
+                }
+
+            # 5) 이미지 경로 확인
             image_path = image_index.get(file_name)
             if not image_path or not Path(image_path).exists():
                 return {
                     'status': 'invalid',
                     'error_type': 'missing_image',
-                    'data': {'file_name': file_name, 'expected_path': image_path}
+                    'data': {'file_name': file_name, 'expected_path': image_path, 'json_path': str(json_path)},
                 }
-            
+
             # 유효한 레코드 반환
             return {
                 'status': 'valid',
                 'data': {
                     'file_name': file_name,
                     'image_path': image_path,
-                    'width': img_meta['width'],
-                    'height': img_meta['height'],
-                    'category_id': final_category_id,
+                    'width': int(img_meta.get('width', config.image_width)),
+                    'height': int(img_meta.get('height', config.image_height)),
+                    'category_id': int(final_category_id),
                     'category_name': img_meta.get('dl_name', 'Unknown'),
                     'bbox_x': x,
                     'bbox_y': y,
                     'bbox_w': w,
                     'bbox_h': h,
-                    'area': annotation.get('area', w * h),
+                    'area': float(annotation.get('area', w * h)),
                     'drug_N': img_meta.get('drug_N', ''),
-                    'json_path': str(json_path)
-                }
+                    'json_path': str(json_path),
+                },
             }
-            
+
         except Exception as e:
             return {
                 'status': 'invalid',
                 'error_type': 'parse_error',
-                'data': {'json_path': str(json_path), 'error': str(e)}
+                'data': {'json_path': str(json_path), 'error': str(e)},
             }
+
 
 
 class DataValidator:
@@ -213,8 +322,9 @@ class DataValidator:
 class DataExporter:
     """데이터 내보내기"""
     
-    def __init__(self, output_path: Path):
+    def __init__(self, output_path: Path, config: DatasetConfig):
         self.output_path = output_path
+        self.config = config
         self.output_path.mkdir(parents=True, exist_ok=True)
     
     def export_csv(self, df: pd.DataFrame, category_map: pd.DataFrame, 
@@ -296,16 +406,36 @@ class DataExporter:
                     f.write(f"{class_idx} {center_x:.6f} {center_y:.6f} "
                            f"{norm_w:.6f} {norm_h:.6f}\n")
         
-        # data.yaml 생성
+
+        # data.yaml 생성 (gci 기준 전체 클래스 고정)
         yaml_path = yolo_dir / "data.yaml"
+        with open(self.config.gci_path, 'r', encoding='utf-8') as f:
+            gci_full = json.load(f)
+
+        # nc는 gci의 클래스 수(=57)
+        nc = len(gci_full.get('id_to_index', {}))
+
+        # names는 index 순서대로
+        index_to_id = {int(k): int(v) for k, v in gci_full.get('index_to_id', {}).items()}
+        cat_map = gci_full.get('category_map', {})
+        names = []
+        for i in range(nc):
+            cid = index_to_id.get(i)
+            if cid is None:
+                names.append(str(i))
+                continue
+            info = cat_map.get(str(cid), {})
+            names.append(info.get('category_name', str(cid)))
+
         with open(yaml_path, 'w', encoding='utf-8') as f:
             f.write(f"path: {yolo_dir.absolute()}\n")
             f.write("train: images\n")
             f.write("val: images\n\n")
-            f.write(f"nc: {len(category_map)}\n")
+            f.write(f"nc: {nc}\n")
             f.write("names:\n")
-            for idx, row in category_map.iterrows():
-                f.write(f"  {idx}: '{row['category_name']}'\n")
+            for i, name in enumerate(names):
+                f.write(f"  {i}: '{name}'\n")
+
 
 
 class DatasetGenerator:
@@ -314,7 +444,13 @@ class DatasetGenerator:
     def __init__(self, config: DatasetConfig):
         self.config = config
         self.output_path = Path(config.output_dir) / config.dataset_name
-        
+
+        # GCI 로드: 허용 클래스(57개)와 YOLO class index 매핑의 기준
+        with open(config.gci_path, 'r', encoding='utf-8') as f:
+            gci = json.load(f)
+        self.allowed_ids = set(map(int, gci.get('id_to_index', {}).keys()))
+
+
         # 로깅 설정
         logging.basicConfig(
             level=logging.INFO,
@@ -324,7 +460,7 @@ class DatasetGenerator:
         
         # 컴포넌트 초기화
         self.image_indexer = ImageIndexer(config.image_root)
-        self.exporter = DataExporter(self.output_path)
+        self.exporter = DataExporter(self.output_path, config)
     
     def generate(self) -> Dict[str, Any]:
         """전체 데이터셋 생성 프로세스"""
@@ -343,7 +479,7 @@ class DatasetGenerator:
             
             # 3. 병렬 처리로 어노테이션 파싱
             validation_result = self._process_annotations_parallel(
-                json_files, image_index
+                json_files, image_index, self.allowed_ids
             )
             
             # 4. DataFrame 생성 및 중복 제거
@@ -376,8 +512,9 @@ class DatasetGenerator:
         self.logger.info(f"발견된 JSON 파일: {len(json_files):,}개")
         return json_files
     
-    def _process_annotations_parallel(self, json_files: List[Path], 
-                                    image_index: Dict[str, str]) -> ValidationResult:
+    def _process_annotations_parallel(self, json_files: List[Path],
+                                    image_index: Dict[str, str],
+                                    allowed_ids: Set[int]) -> ValidationResult:
         """JSON 어노테이션 병렬 처리"""
         self.logger.info(f"\n[2단계] 어노테이션 병렬 처리 (워커: {self.config.max_workers}개)...")
         
@@ -390,7 +527,7 @@ class DatasetGenerator:
             futures = {
                 executor.submit(
                     AnnotationProcessor.parse_single_json,
-                    json_file, self.config, image_index
+                    json_file, self.config, image_index, allowed_ids
                 ): json_file 
                 for json_file in json_files
             }
@@ -526,14 +663,16 @@ if __name__ == "__main__":
     
     # 설정 생성
     config = DatasetConfig(
-        label_root=r"E:\download\sprint_ai_project1_data\train_annotations",
-        image_root=r"E:\download\sprint_ai_project1_data\train_images",
+        label_root=r"E:\download\label_aug",
+        image_root=r"E:\download\image_aug",
         output_dir=r"E:\download\datasets",
-        dataset_name="original_data",
+        dataset_name="train_plus_extra",
         dataset_type="combination",
-        exclude_index_images=False,
+        gci_path=r"E:\download\gci_57.json",
+        exclude_index_images=True,
         max_workers=4  # CPU 코어 수에 맞춰 조정
     )
+    
     
     # 데이터셋 생성
     generator = DatasetGenerator(config)
