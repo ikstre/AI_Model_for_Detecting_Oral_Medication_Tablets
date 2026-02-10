@@ -238,17 +238,17 @@ def preprocess_dataset_with_clahe(
 if __name__ == '__main__':
     # Train 이미지 전처리
     preprocess_dataset_with_clahe(
-        input_dir=r'E:\download\sprint_ai_project1_data\test_images',
-        output_dir=r'E:\download\sprint_ai_project1_data\test_images_clahe',
+        input_dir=r'E:\download\datasets\original_data\yolo_format\images',
+        output_dir=r'E:\download\datasets\original_data\yolo_clahe\images',
         clip_limit=2.5
     )
     
-    # # 라벨 파일 복사
-    # import shutil
-    # shutil.copytree(
-    #     r'E:\download\datasets\original_trainset\yolo_format\labels',
-    #     r'E:\download\datasets\original_trainset\yolo_clahe\labels'
-    # )
+    # 라벨 파일 복사
+    import shutil
+    shutil.copytree(
+        r'E:\download\datasets\original_data\yolo_format\labels',
+        r'E:\download\datasets\original_data\yolo_clahe\labels'
+    )
     
 
 # # 최종 추천 방식

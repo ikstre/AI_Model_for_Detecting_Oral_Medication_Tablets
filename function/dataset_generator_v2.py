@@ -526,11 +526,11 @@ if __name__ == "__main__":
     
     # 설정 생성
     config = DatasetConfig(
-        label_root=r"E:\download\label\단일경구약제_5000종\TL_81_단일",
-        image_root=r"E:\download\image\단일경구약제_5000종\TS_81_단일",
+        label_root=r"E:\download\sprint_ai_project1_data\train_annotations",
+        image_root=r"E:\download\sprint_ai_project1_data\train_images",
         output_dir=r"E:\download\datasets",
-        dataset_name="TS_81_single",
-        dataset_type="single",
+        dataset_name="original_data",
+        dataset_type="combination",
         exclude_index_images=False,
         max_workers=4  # CPU 코어 수에 맞춰 조정
     )
