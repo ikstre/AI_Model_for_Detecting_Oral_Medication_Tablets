@@ -25,11 +25,16 @@ class CFG:
     # yolo dataset export
     yolo_dataset_dir = "yolo_pill_ds"
     export_dir = "exports_pill"
-    val_ratio = 0.2
+    split = 0.9  # train fraction (train=split, val=1-split)
+    val_ratio = 1 - split  # val fraction
 
     # runs/paths
     work_dir = "runs_pill"
     baseline_name = "baseline"
+
+    # Ultralytics run output
+    project = r"yolo_runs"
+    name = "pill_baseline_augdata"
     optuna_subdir = "optuna"
 
     # -------------------------
@@ -51,10 +56,14 @@ class CFG:
     imgsz = 640
     epochs = 300
     batch = 8
-    lr0 = 1e-3
+    lr0 = 5e-4
     weight_decay = 1e-4
     optimizer = "AdamW"
     device = 0  # 0 or "cpu"
+    patience = 30
+    workers = 0
+    amp = True
+    save_period = 10
 
     # -------------------------
     # 증강(색상은 꺼두고, 기하/혼합만 사용하도록 기본값 구성)
@@ -67,21 +76,49 @@ class CFG:
     degrees = 10.0
     translate = 0.10
     scale = 0.20
-    shear = 2.0
-    perspective = 0.0005
+    shear = 0.0
+    perspective = 0.0
 
     fliplr = 0.5
-    flipud = 0.0
+    flipud = 0.5
 
-    mosaic = 1.0
+    mosaic = 0.25
     mixup = 0.0
     close_mosaic = 0
+
+    erasing = 0.2  # Random erasing probability
 
     # -------------------------
     # 불균형 보정(옵션): train.txt에 추가로 반복 샘플링할 비율
     # - 예: 0.5면 train 이미지 수의 50%만큼을 추가로 더 뽑아서 train.txt에 append
     # -------------------------
     balance_enable = True
+    # train list oversample 강도 (balance_enable=True일 때만 의미)
+    # - 0.3이면 train 이미지 수의 30%만큼을 "추가로" 뽑아 train.txt에 append
+    balance_extra_ratio = 0.30
+    balance_power = 1.0
+
+    # -------------------------
+    # class_weight.py 기반 클래스 가중치(옵션)
+    # - class_weights.json이 존재하면(또는 생성하면) 그 값을 우선 사용
+    # - Ultralytics는 data.yaml의 class_weights를 기본적으로 사용하지 않으므로,
+    #   본 파이프라인에서는 "train.txt oversample"에 가중치를 반영하는 방식으로 적용합니다.
+    # -------------------------
+    class_weight_enable = True
+    class_weight_json = ""  # 비워두면 (work_dir/class_weights.json)을 자동 사용
+    class_weight_category_csv = ""   # (선택) global_category_index.csv 등
+    class_weight_submission_csv = "" # (선택) score_mean_base 컬럼이 있는 csv
+    class_weight_count_threshold = 15  # class_weight.py의 기본값
+
+    # -------------------------
+    # 데이터 품질 검사( dataset_generator_v2_patched_final 참고 )
+    # -------------------------
+    exclude_index_images = True   # file_name에 '_index'가 포함된 샘플 제외
+    image_width = 976
+    image_height = 1280
+    strict_sanitize = True        # bbox/area/bounds 검사 강화
+    dedup_images = True           # 동일 file_name 중복 제거
+
     # -------------------------
     # Optuna
     # -------------------------
@@ -108,8 +145,8 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
     # 기본 args
     args = dict(
         data=data_yaml,
-        project=str(getattr(cfg, 'work_dir', 'runs_pill')),
-        name=str(getattr(cfg, 'baseline_name', 'baseline')),
+        project=str(getattr(cfg, 'project', getattr(cfg, 'work_dir', 'runs_pill'))),
+        name=str(getattr(cfg, 'name', getattr(cfg, 'baseline_name', 'baseline'))),
         exist_ok=True,
         imgsz=int(cfg.imgsz),
         epochs=epochs,
@@ -118,6 +155,10 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
         weight_decay=float(cfg.weight_decay),
         optimizer=str(cfg.optimizer),
         device=cfg.device,
+        patience=int(getattr(cfg, 'patience', 50)),
+        workers=int(getattr(cfg, 'workers', 8)),
+        amp=bool(getattr(cfg, 'amp', True)),
+        save_period=int(getattr(cfg, 'save_period', -1)),
         close_mosaic=int(getattr(cfg, "close_mosaic", 0)),
         verbose=False,
 
@@ -128,12 +169,13 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
         degrees=float(getattr(cfg, "degrees", 0.0)),
         translate=float(getattr(cfg, "translate", 0.0)),
         scale=float(getattr(cfg, "scale", 0.0)),
-        shear=float(getattr(cfg, "shear", 0.0)),
-        perspective=float(getattr(cfg, "perspective", 0.0)),
+        shear = 0.0,
+        perspective = 0.0,
         fliplr=float(getattr(cfg, "fliplr", 0.0)),
         flipud=float(getattr(cfg, "flipud", 0.0)),
         mosaic=float(getattr(cfg, "mosaic", 0.0)),
         mixup=float(getattr(cfg, "mixup", 0.0)),
+        erasing=float(getattr(cfg, "erasing", 0.0)),
     )
 
     # trial별 overrides
