@@ -12,7 +12,7 @@ if __name__ == "__main__":
     model = YOLO("yolov8s.pt")
 
     results = model.train(
-    data=r"E:\download\datasets\train_plus_extra_full\yolo_format\data.yaml",
+    data=r"E:\download\datasets\train_plus_extra_refined\yolo_format\data.yaml",
     split=0.9,
 
     epochs=500,
@@ -42,6 +42,6 @@ if __name__ == "__main__":
     device=0,
 
     project=r"E:\yolo_runs",
-    name="pill_baseline_augdata_full",
+    name="pill_baseline_augdata_refined",
     save_period=10
 )

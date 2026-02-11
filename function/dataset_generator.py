@@ -1,445 +1,680 @@
-import pandas as pd
-from pathlib import Path
-from typing import Dict, List, Tuple
-import shutil
 import os
 import json
-import re
-from glob import glob
+import time
+import shutil
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any, Set
+from dataclasses import dataclass, field
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections import defaultdict
+
+import pandas as pd
 
 
-def create_training_dataset(
-    label_root: str,
-    image_root: str,
-    output_dir: str,
-    dataset_name: str,
-    dataset_type: str = 'combination',  # 'combination' or 'single'
+@dataclass
+class DatasetConfig:
+    """데이터셋 생성 설정"""
+    label_root: str
+    image_root: str
+    output_dir: str
+    dataset_name: str
+    gci_path: str
+    dataset_type: str = 'combination'
     exclude_index_images: bool = True
-) -> Dict: # Dict를 반환하는 함수임.
-    """
-    검증된 데이터를 기반으로 학습용 데이터셋 생성
+    image_width: int = 976
+    image_height: int = 1280
+    max_workers: int = 4
+
+
+@dataclass
+class ValidationResult:
+    """검증 결과를 담는 데이터 클래스"""
+    valid_records: List[Dict] = field(default_factory=list)
+    invalid_records: Dict[str, List] = field(default_factory=lambda: defaultdict(list))
+    duplicate_details: List[Dict] = field(default_factory=list)
+    processing_time: float = 0.0
+
+
+class ImageIndexer:
+    """이미지 경로 인덱싱 및 캐싱"""
     
-    Args:
-        label_root: JSON annotation 루트 디렉토리
-        image_root: 이미지 루트 디렉토리
-        output_dir: 데이터셋을 저장할 디렉토리
-        dataset_name: 데이터셋 이름 (예: 'TS_8_combination', 'TS_10_single')
-        dataset_type: 'combination' 또는 'single'
-        exclude_index_images: _index.png 파일 제외 여부
+    def __init__(self, image_root: str):
+        self.image_root = Path(image_root)
+        self._index: Dict[str, str] = {}
     
-    Returns:
-        dict: 데이터셋 생성 결과
-    """
+    def build_index(self) -> Dict[str, str]:
+        """이미지 디렉터리를 스캔하여 파일명-경로 맵 생성"""
+        logging.info("이미지 경로 인덱싱 시작...")
+        
+        image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff'}
+        count = 0
+        
+        for image_path in self.image_root.rglob('*'):
+            if image_path.suffix.lower() in image_extensions:
+                filename = image_path.name
+                if filename not in self._index:  # 중복 방지
+                    self._index[filename] = str(image_path)
+                    count += 1
+        
+        logging.info(f"인덱싱 완료: {count:,}개 이미지 등록")
+        return self._index
     
-    print("=" * 80)
-    print(f"데이터셋 생성: {dataset_name}")
-    print("=" * 80)
+    def get_path(self, filename: str) -> Optional[str]:
+        """파일명으로 경로 조회 (O(1))"""
+        return self._index.get(filename)
+
+
+class AnnotationProcessor:
+    """JSON 어노테이션 처리"""
     
-    # 출력 디렉토리 생성
-    dataset_output = os.path.join(output_dir, dataset_name)
-    os.makedirs(dataset_output, exist_ok=True)
-    
-    # 1. JSON 파일 수집
-    print("\n[1단계] JSON 파일 수집 및 파싱...")
-    json_files = glob(os.path.join(label_root, "**", "*.json"), recursive=True)
-    print(f"   └─ 발견된 JSON 파일: {len(json_files)}개")
-    
-    # 2. 데이터 파싱 및 검증
-    print("\n[2단계] 데이터 파싱 및 검증...")
-    
-    valid_records = []
-    invalid_records = {
-        'missing_image': [],
-        'missing_bbox': [],
-        'invalid_category': [],
-        'out_of_bounds': [],
-        'is_index_file': []
-    }
-    
-    IMG_W, IMG_H = 976, 1280
-    
-    for idx, json_path in enumerate(json_files):
+    @staticmethod
+    def parse_single_json(
+        json_path: Path,
+        config: DatasetConfig,
+        image_index: Dict[str, str],
+        allowed_ids: Set[int],
+    ) -> Dict[str, Any]:
+        """단일 JSON 파일 파싱 (병렬 처리용 정적 메서드)
+
+        - 카테고리 ID 결정 규칙
+          1) 기본적으로 img_meta['dl_idx']를 우선 사용
+          2) 단, 추가 데이터에서는 dl_idx가 '실제 카테고리ID - 1'로 들어올 수 있으므로
+             (dl_idx + 1)이 allowed_ids에 있으면 +1 보정해서 사용
+          3) dl_idx가 없으면 annotation['category_id']를 사용 (가능하면 동일 보정 로직 적용)
+
+        - 필터링
+          allowed_ids(=gci_57.json의 id_to_index 키 집합)에 없는 클래스는 제거
+
+        - 품질 검사
+          1) bbox 존재/형식
+          2) bbox 경계 이탈
+          3) bbox 면적(w*h)과 annotation['area'] 불일치 제거
+        """
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             img_meta = data['images'][0]
             annotation = data['annotations'][0]
-            
-            file_name = img_meta['file_name']
-            
-            # _index 파일 필터링
-            if exclude_index_images and '_index' in file_name:
-                invalid_records['is_index_file'].append({
-                    'file_name': file_name,
-                    'json_path': json_path
-                })
-                continue
-            
-            # bbox 결측값 확인
+            file_name = img_meta.get('file_name')
+
+            if not file_name:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'missing_filename',
+                    'data': {'json_path': str(json_path)},
+                }
+
+            # 1) _index 파일 필터링
+            if config.exclude_index_images and '_index' in file_name:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'is_index_file',
+                    'data': {'file_name': file_name, 'json_path': str(json_path)},
+                }
+
+            # 2) bbox 검증
             bbox = annotation.get('bbox')
-            if bbox is None or len(bbox) != 4:
-                invalid_records['missing_bbox'].append({
-                    'file_name': file_name,
-                    'json_path': json_path,
-                    'bbox': bbox
-                })
-                continue
-            
-            # bbox 경계 이탈 확인
-            x, y, w, h = bbox
-            if x + w > IMG_W or y + h > IMG_H or x < 0 or y < 0:
-                invalid_records['out_of_bounds'].append({
-                    'file_name': file_name,
-                    'bbox': bbox,
-                    'overflow_x': max(0, x + w - IMG_W),
-                    'overflow_y': max(0, y + h - IMG_H)
-                })
-                continue
-            
-            # Category ID 추출 (dl_idx 우선 사용)
+            if not bbox or len(bbox) != 4:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'missing_bbox',
+                    'data': {'file_name': file_name, 'json_path': str(json_path)},
+                }
+
+            try:
+                x, y, w, h = map(float, bbox)
+            except Exception:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'invalid_bbox_format',
+                    'data': {'file_name': file_name, 'bbox': bbox, 'json_path': str(json_path)},
+                }
+
+            # 음수/0 크기 방지(너무 엄격하면 w/h==0도 걸러짐)
+            if w <= 0 or h <= 0:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'invalid_bbox_size',
+                    'data': {'file_name': file_name, 'bbox': [x, y, w, h], 'json_path': str(json_path)},
+                }
+
+            # 2.5) bbox 면적 불일치 제거
+            area = annotation.get('area')
+            if area is not None:
+                try:
+                    area_val = float(area)
+                    wh = w * h
+                    # 정수 반올림/부동소수 오차 감안: 1px^2 또는 0.5% 중 큰 값 허용
+                    tol = max(1.0, wh * 0.005)
+                    if abs(area_val - wh) > tol:
+                        return {
+                            'status': 'invalid',
+                            'error_type': 'area_mismatch',
+                            'data': {
+                                'file_name': file_name,
+                                'bbox': [x, y, w, h],
+                                'area': area_val,
+                                'w*h': wh,
+                                'tol': tol,
+                                'json_path': str(json_path),
+                            },
+                        }
+                except Exception:
+                    return {
+                        'status': 'invalid',
+                        'error_type': 'invalid_area',
+                        'data': {'file_name': file_name, 'area': area, 'json_path': str(json_path)},
+                    }
+
+            # 3) bbox 경계 검증
+            if (
+                x < 0
+                or y < 0
+                or x + w > config.image_width
+                or y + h > config.image_height
+            ):
+                return {
+                    'status': 'invalid',
+                    'error_type': 'out_of_bounds',
+                    'data': {
+                        'file_name': file_name,
+                        'bbox': [x, y, w, h],
+                        'overflow_x': max(0.0, x + w - config.image_width),
+                        'overflow_y': max(0.0, y + h - config.image_height),
+                        'json_path': str(json_path),
+                    },
+                }
+
+            # 4) 카테고리 ID 추출 + (추가데이터 -1) 보정
+            def _pick_and_fix(raw: Any) -> Optional[int]:
+                if raw is None:
+                    return None
+                s = str(raw).strip()
+                if not s:
+                    return None
+                try:
+                    v = int(s)
+                except Exception:
+                    return None
+
+                # 우선 v 그대로
+                if v in allowed_ids:
+                    return v
+                # 추가데이터는 -1로 들어온다 -> +1 보정
+                if (v + 1) in allowed_ids:
+                    return v + 1
+                return v  # 일단 반환(아래에서 allowed_ids 필터로 걸러짐)
+
             dl_idx = img_meta.get('dl_idx')
             category_id = annotation.get('category_id')
-            
-            # dl_idx가 있으면 우선 사용 (추가 데이터)
-            if dl_idx and str(dl_idx).strip():
-                final_category_id = int(dl_idx)
-            elif category_id:
-                final_category_id = int(category_id)
-            else:
-                invalid_records['invalid_category'].append({
+
+            final_category_id = _pick_and_fix(dl_idx)
+            if final_category_id is None:
+                final_category_id = _pick_and_fix(category_id)
+
+            if final_category_id is None:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'invalid_category',
+                    'data': {
+                        'file_name': file_name,
+                        'dl_idx': dl_idx,
+                        'category_id': category_id,
+                        'json_path': str(json_path),
+                    },
+                }
+
+            # 57개 클래스 필터
+            if final_category_id not in allowed_ids:
+                return {
+                    'status': 'invalid',
+                    'error_type': 'not_in_train57',
+                    'data': {
+                        'file_name': file_name,
+                        'category_id': final_category_id,
+                        'dl_idx': dl_idx,
+                        'orig_category_id': category_id,
+                        'json_path': str(json_path),
+                    },
+                }
+
+            # 5) 이미지 경로 확인
+            image_path = image_index.get(file_name)
+            if not image_path or not Path(image_path).exists():
+                return {
+                    'status': 'invalid',
+                    'error_type': 'missing_image',
+                    'data': {'file_name': file_name, 'expected_path': image_path, 
+                             'json_path': str(json_path)},
+                }
+
+            # 유효한 레코드 반환
+            return {
+                'status': 'valid',
+                'data': {
                     'file_name': file_name,
-                    'dl_idx': dl_idx,
-                    'category_id': category_id
+                    'image_path': image_path,
+                    'width': int(img_meta.get('width', config.image_width)),
+                    'height': int(img_meta.get('height', config.image_height)),
+                    'category_id': int(final_category_id),
+                    'category_name': img_meta.get('dl_name', 'Unknown'),
+                    'bbox_x': x,
+                    'bbox_y': y,
+                    'bbox_w': w,
+                    'bbox_h': h,
+                    'area': float(annotation.get('area', w * h)),
+                    'drug_N': img_meta.get('drug_N', ''),
+                    'json_path': str(json_path),
+                },
+            }
+
+        except Exception as e:
+            return {
+                'status': 'invalid',
+                'error_type': 'parse_error',
+                'data': {'json_path': str(json_path), 'error': str(e)},
+            }
+
+
+
+class DataValidator:
+    """데이터 검증 및 중복 제거"""
+    
+    @staticmethod
+    def remove_duplicates(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict], int]:
+        """중복 bbox 제거"""
+        if df.empty:
+            return df, [], 0
+        
+        # bbox 튜플 생성
+        df['bbox_tuple'] = list(zip(
+            df['bbox_x'], df['bbox_y'], df['bbox_w'], df['bbox_h']
+        ))
+        
+        # 중복 마스크 생성
+        duplicate_mask = df.duplicated(
+            subset=['file_name', 'bbox_tuple'], keep=False
+        )
+        
+        duplicates = df[duplicate_mask]
+        duplicate_details = []
+        
+        if not duplicates.empty:
+            for (filename, bbox_tuple), group in duplicates.groupby(
+                ['file_name', 'bbox_tuple']
+            ):
+                duplicate_details.append({
+                    'file_name': filename,
+                    'bbox': list(bbox_tuple),
+                    'count': len(group),
+                    'records': group[['drug_N', 'category_name', 'json_path']].to_dict('records')
                 })
+        
+        # 중복 제거
+        before_count = len(df)
+        df_clean = df[~duplicate_mask].drop(columns=['bbox_tuple'])
+        removed_count = before_count - len(df_clean)
+        
+        return df_clean, duplicate_details, removed_count
+
+
+class DataExporter:
+    """데이터 내보내기"""
+    
+    def __init__(self, output_path: Path, config: DatasetConfig):
+        self.output_path = output_path
+        self.config = config
+        self.output_path.mkdir(parents=True, exist_ok=True)
+    
+    def export_csv(self, df: pd.DataFrame, category_map: pd.DataFrame, 
+                   dataset_name: str) -> Dict[str, str]:
+        """CSV 파일 내보내기"""
+        files = {}
+        
+        # 데이터셋 CSV
+        dataset_path = self.output_path / f"{dataset_name}_dataset.csv"
+        df.to_csv(dataset_path, index=False, encoding='utf-8-sig')
+        files['dataset_csv'] = str(dataset_path)
+        
+        # 카테고리 CSV
+        category_path = self.output_path / f"{dataset_name}_categories.csv"
+        category_map.to_csv(category_path, index=False, encoding='utf-8-sig')
+        files['category_csv'] = str(category_path)
+        
+        return files
+    
+    def export_reports(self, validation_result: ValidationResult, 
+                      dataset_name: str) -> Dict[str, str]:
+        """보고서 파일 내보내기"""
+        files = {}
+        
+        # 무효 레코드 보고서
+        invalid_path = self.output_path / f"{dataset_name}_invalid_records.json"
+        with open(invalid_path, 'w', encoding='utf-8') as f:
+            json.dump(dict(validation_result.invalid_records), 
+                     f, ensure_ascii=False, indent=2)
+        files['invalid_report'] = str(invalid_path)
+        
+        # 중복 bbox 보고서
+        duplicate_path = self.output_path / f"{dataset_name}_duplicate_bboxes.json"
+        with open(duplicate_path, 'w', encoding='utf-8') as f:
+            json.dump(validation_result.duplicate_details, 
+                     f, ensure_ascii=False, indent=2)
+        files['duplicate_report'] = str(duplicate_path)
+        
+        return files
+    
+    def create_yolo_format(self, df: pd.DataFrame, category_map: pd.DataFrame):
+        """YOLO 형식 데이터셋 생성"""
+        yolo_dir = self.output_path / "yolo_format"
+        images_dir = yolo_dir / "images"
+        labels_dir = yolo_dir / "labels"
+        
+        images_dir.mkdir(parents=True, exist_ok=True)
+        labels_dir.mkdir(parents=True, exist_ok=True)
+        
+        category_to_idx = {
+            row['category_id']: idx 
+            for idx, row in category_map.iterrows()
+        }
+        
+        for file_name, group in df.groupby('file_name'):
+            # 이미지 복사
+            src_image = Path(group.iloc[0]['image_path'])
+            dst_image = images_dir / file_name
+            
+            if not dst_image.exists():
+                shutil.copy2(src_image, dst_image)
+            
+            # 라벨 파일 생성
+            label_file = dst_image.stem + '.txt'
+            label_path = labels_dir / label_file
+            
+            with open(label_path, 'w') as f:
+                for _, row in group.iterrows():
+                    # YOLO 정규화
+                    img_w, img_h = row['width'], row['height']
+                    x, y, w, h = row['bbox_x'], row['bbox_y'], row['bbox_w'], row['bbox_h']
+                    
+                    center_x = (x + w / 2) / img_w
+                    center_y = (y + h / 2) / img_h
+                    norm_w = w / img_w
+                    norm_h = h / img_h
+                    
+                    class_idx = category_to_idx[row['category_id']]
+                    f.write(f"{class_idx} {center_x:.6f} {center_y:.6f} "
+                           f"{norm_w:.6f} {norm_h:.6f}\n")
+        
+
+        # data.yaml 생성 (gci 기준 전체 클래스 고정)
+        yaml_path = yolo_dir / "data.yaml"
+        with open(self.config.gci_path, 'r', encoding='utf-8') as f:
+            gci_full = json.load(f)
+
+        # nc는 gci의 클래스 수(=57)
+        nc = len(gci_full.get('id_to_index', {}))
+
+        # names는 index 순서대로
+        index_to_id = {int(k): int(v) for k, v in gci_full.get('index_to_id', {}).items()}
+        cat_map = gci_full.get('category_map', {})
+        names = []
+        for i in range(nc):
+            cid = index_to_id.get(i)
+            if cid is None:
+                names.append(str(i))
                 continue
+            info = cat_map.get(str(cid), {})
+            names.append(info.get('category_name', str(cid)))
+
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            f.write(f"path: {yolo_dir.absolute()}\n")
+            f.write("train: images\n")
+            f.write("val: images\n\n")
+            f.write(f"nc: {nc}\n")
+            f.write("names:\n")
+            for i, name in enumerate(names):
+                f.write(f"  {i}: '{name}'\n")
+
+
+
+class DatasetGenerator:
+    """메인 데이터셋 생성기"""
+    
+    def __init__(self, config: DatasetConfig):
+        self.config = config
+        self.output_path = Path(config.output_dir) / config.dataset_name
+
+        # GCI 로드: 허용 클래스(57개)와 YOLO class index 매핑의 기준
+        with open(config.gci_path, 'r', encoding='utf-8') as f:
+            gci = json.load(f)
+        self.allowed_ids = set(map(int, gci.get('id_to_index', {}).keys()))
+
+
+        # 로깅 설정
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        self.logger = logging.getLogger(__name__)
+        
+        # 컴포넌트 초기화
+        self.image_indexer = ImageIndexer(config.image_root)
+        self.exporter = DataExporter(self.output_path, config)
+    
+    def generate(self) -> Dict[str, Any]:
+        """전체 데이터셋 생성 프로세스"""
+        start_time = time.time()
+        
+        self.logger.info("=" * 80)
+        self.logger.info(f"데이터셋 생성 시작: {self.config.dataset_name}")
+        self.logger.info("=" * 80)
+        
+        try:
+            # 1. 이미지 인덱싱
+            image_index = self.image_indexer.build_index()
             
-            # 이미지 파일 경로 찾기
-            image_path = find_image_file(image_root, file_name)
+            # 2. JSON 파일 수집
+            json_files = self._collect_json_files()
             
-            if not image_path or not os.path.exists(image_path):
-                invalid_records['missing_image'].append({
-                    'file_name': file_name,
-                    'expected_path': image_path
-                })
-                continue
+            # 3. 병렬 처리로 어노테이션 파싱
+            validation_result = self._process_annotations_parallel(
+                json_files, image_index, self.allowed_ids
+            )
             
-            # 유효한 레코드 저장
-            valid_records.append({
-                'file_name': file_name,
-                'image_path': image_path,
-                'width': img_meta['width'],
-                'height': img_meta['height'],
-                'category_id': final_category_id,
-                'category_name': img_meta.get('dl_name', 'Unknown'),
-                'bbox_x': bbox[0],
-                'bbox_y': bbox[1],
-                'bbox_w': bbox[2],
-                'bbox_h': bbox[3],
-                'area': annotation.get('area', bbox[2] * bbox[3]),
-                'drug_N': img_meta.get('drug_N', ''),
-                'json_path': json_path
-            })
+            # 4. DataFrame 생성 및 중복 제거
+            df = self._create_and_clean_dataframe(validation_result)
+            
+            # 5. 카테고리 맵 생성
+            category_map = self._create_category_map(df)
+            
+            # 6. 파일 내보내기
+            export_files = self._export_all_files(
+                df, category_map, validation_result
+            )
+            
+            # 7. 통계 생성
+            stats = self._generate_final_stats(
+                df, category_map, validation_result, start_time, export_files
+            )
+            
+            self._print_summary(stats)
+            return stats
             
         except Exception as e:
-            invalid_records['missing_bbox'].append({
-                'file_name': 'unknown',
-                'json_path': json_path,
-                'error': str(e)
-            })
+            self.logger.error(f"데이터셋 생성 실패: {e}")
+            raise
+    
+    def _collect_json_files(self) -> List[Path]:
+        """JSON 파일 수집"""
+        self.logger.info("\n[1단계] JSON 파일 수집...")
+        json_files = list(Path(self.config.label_root).rglob('*.json'))
+        self.logger.info(f"발견된 JSON 파일: {len(json_files):,}개")
+        return json_files
+    
+    def _process_annotations_parallel(self, json_files: List[Path],
+                                    image_index: Dict[str, str],
+                                    allowed_ids: Set[int]) -> ValidationResult:
+        """JSON 어노테이션 병렬 처리"""
+        self.logger.info(f"\n[2단계] 어노테이션 병렬 처리 (워커: {self.config.max_workers}개)...")
         
-        if (idx + 1) % 500 == 0:
-            print(f"   진행중... {idx + 1}/{len(json_files)} 파일 처리 완료")
+        result = ValidationResult()
+        total = len(json_files)
+        processed = 0
+        
+        with ProcessPoolExecutor(max_workers=self.config.max_workers) as executor:
+            # 작업 제출
+            futures = {
+                executor.submit(
+                    AnnotationProcessor.parse_single_json,
+                    json_file, self.config, image_index, allowed_ids
+                ): json_file 
+                for json_file in json_files
+            }
+            
+            # 결과 수집
+            for future in as_completed(futures):
+                try:
+                    parsed_result = future.result()
+                    
+                    if parsed_result['status'] == 'valid':
+                        result.valid_records.append(parsed_result['data'])
+                    else:
+                        error_type = parsed_result['error_type']
+                        result.invalid_records[error_type].append(parsed_result['data'])
+                    
+                    processed += 1
+                    if processed % 1000 == 0:
+                        self.logger.info(f"진행률: {processed}/{total} ({processed/total*100:.1f}%)")
+                        
+                except Exception as e:
+                    self.logger.error(f"처리 오류: {e}")
+        
+        self.logger.info(f"파싱 완료 - 유효: {len(result.valid_records):,}개")
+        for error_type, records in result.invalid_records.items():
+            if records:
+                self.logger.info(f"  {error_type}: {len(records)}개")
+        
+        return result
     
-    print(f"\n   ✅ 유효 레코드: {len(valid_records)}개")
-    print(f"   ❌ 무효 레코드:")
-    print(f"      • _index 파일: {len(invalid_records['is_index_file'])}개")
-    print(f"      • 이미지 없음: {len(invalid_records['missing_image'])}개")
-    print(f"      • bbox 결측: {len(invalid_records['missing_bbox'])}개")
-    print(f"      • bbox 이탈: {len(invalid_records['out_of_bounds'])}개")
-    print(f"      • category 오류: {len(invalid_records['invalid_category'])}개")
+    def _create_and_clean_dataframe(self, validation_result: ValidationResult) -> pd.DataFrame:
+        """DataFrame 생성 및 중복 제거"""
+        self.logger.info("\n[3단계] DataFrame 생성 및 중복 제거...")
+        
+        if not validation_result.valid_records:
+            self.logger.warning("유효한 레코드가 없습니다.")
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(validation_result.valid_records)
+        
+        # 중복 제거
+        df_clean, duplicate_details, removed_count = DataValidator.remove_duplicates(df)
+        
+        validation_result.duplicate_details = duplicate_details
+        
+        self.logger.info(f"중복 제거 완료 - 제거: {removed_count}개, 남은 레코드: {len(df_clean):,}개")
+        
+        return df_clean
     
-    # 3. DataFrame 생성
-    print("\n[3단계] DataFrame 생성...")
-    df = pd.DataFrame(valid_records)
-
-    # 3-1. 중복 bbox 검증 및 제거
-    print("\n[3-1단계] 중복 bbox 검증 중...")
-
-    # bbox tuple 컬럼 생성
-    df['bbox_tuple'] = list(zip(
-        df['bbox_x'], df['bbox_y'], df['bbox_w'], df['bbox_h']
-    ))
-
-    # file_name + bbox 기준 중복 탐색 (모든 중복 포함)
-    duplicate_mask = df.duplicated(
-        subset=['file_name', 'bbox_tuple'],
-        keep=False   # ★ 핵심: 중복된 모든 행 True
-    )
-
-    duplicates = df[duplicate_mask]
-
-    duplicate_details = []
-
-    if not duplicates.empty:
-        duplicate_groups = duplicates.groupby(['file_name', 'bbox_tuple'])
-
-        for (filename, bbox_tuple), group in duplicate_groups:
-            drugs = group[['drug_N', 'category_name', 'json_path']].to_dict('records')
-
-            duplicate_details.append({
-                'file_name': filename,
-                'bbox': list(bbox_tuple),
-                'count': len(group),
-                'records': drugs
-            })
-
-    print(f"   └─ 중복 bbox 발견: {len(duplicate_details)}개 케이스")
-
-    # 중복 bbox 전체 제거 (하나도 남기지 않음)
-    before_cnt = len(df)
-    df = df[~duplicate_mask]
-    after_cnt = len(df)
-
-    print(f"   └─ 중복 bbox 전체 제거 완료: {before_cnt - after_cnt}개 삭제됨")
-
-    # 임시 컬럼 제거
-    df = df.drop(columns=['bbox_tuple'])
- 
-    # 4. 카테고리 정보 생성
-    print("\n[4단계] 카테고리 정보 생성...")
-    category_map = df[['category_id', 'category_name']].drop_duplicates()
-    category_map = category_map.sort_values('category_id').reset_index(drop=True)
+    def _create_category_map(self, df: pd.DataFrame) -> pd.DataFrame:
+        """카테고리 맵 생성"""
+        if df.empty:
+            return pd.DataFrame()
+        
+        category_map = (df[['category_id', 'category_name']]
+                       .drop_duplicates()
+                       .sort_values('category_id')
+                       .reset_index(drop=True))
+        
+        self.logger.info(f"카테고리 맵 생성 완료 - 총 {len(category_map)}개 카테고리")
+        return category_map
     
-    print(f"   └─ 전체 약 종류: {len(category_map)}개")
+    def _export_all_files(self, df: pd.DataFrame, category_map: pd.DataFrame,
+                         validation_result: ValidationResult) -> Dict[str, str]:
+        """모든 파일 내보내기"""
+        self.logger.info("\n[4단계] 파일 내보내기...")
+        
+        export_files = {}
+        
+        # CSV 파일
+        csv_files = self.exporter.export_csv(df, category_map, self.config.dataset_name)
+        export_files.update(csv_files)
+        
+        # 보고서 파일
+        report_files = self.exporter.export_reports(validation_result, self.config.dataset_name)
+        export_files.update(report_files)
+        
+        # YOLO 형식
+        if not df.empty:
+            self.exporter.create_yolo_format(df, category_map)
+            export_files['yolo_format'] = str(self.output_path / "yolo_format")
+        
+        self.logger.info("파일 내보내기 완료")
+        return export_files
     
-    # 5. 데이터셋 파일 저장
-    print("\n[5단계] 데이터셋 파일 저장...")
-    
-    # 5-1. 전체 데이터 CSV
-    dataset_csv_path = os.path.join(dataset_output, f"{dataset_name}_dataset.csv")
-    df.to_csv(dataset_csv_path, index=False, encoding='utf-8-sig')
-    print(f"   ✅ 데이터셋 CSV: {dataset_csv_path}")
-    
-    # 5-2. 카테고리 맵 CSV
-    category_csv_path = os.path.join(dataset_output, f"{dataset_name}_categories.csv")
-    category_map.to_csv(category_csv_path, index=False, encoding='utf-8-sig')
-    print(f"   ✅ 카테고리 CSV: {category_csv_path}")
-    
-    # 5-3. YOLO 형식 (선택적)
-    yolo_output = os.path.join(dataset_output, "yolo_format")
-    create_yolo_format(df, category_map, yolo_output)
-    
-    # 5-4. 무효 레코드 보고서
-    invalid_report_path = os.path.join(dataset_output, f"{dataset_name}_invalid_records.json")
-    with open(invalid_report_path, 'w', encoding='utf-8') as f:
-        json.dump(invalid_records, f, ensure_ascii=False, indent=2)
-    print(f"   ✅ 무효 레코드 보고서: {invalid_report_path}")
-
-    # 5-5. 중복 bbox 보고서
-    duplicate_report_path = os.path.join(dataset_output, f"{dataset_name}_duplicate_bboxes.json")
-
-    with open(duplicate_report_path, 'w', encoding='utf-8') as f:
-        json.dump(duplicate_details, f, ensure_ascii=False, indent=2)
-
-    print(f"   ✅ 중복 bbox 보고서: {duplicate_report_path}")
-    
-    # 6. 통계 정보
-    stats = {
-        'dataset_name': dataset_name,
-        'dataset_type': dataset_type,
-        'total_valid_records': len(df),
-        'total_images': df['file_name'].nunique(),
-        'total_categories': len(category_map),
-        'invalid_counts': {
-            **{k: len(v) for k, v in invalid_records.items()},
-            'duplicate_bbox_removed': before_cnt - after_cnt
-        },
-        'output_dir': dataset_output,
-        'files': {
-            'dataset_csv': dataset_csv_path,
-            'category_csv': category_csv_path,
-            'invalid_report': invalid_report_path
+    def _generate_final_stats(self, df: pd.DataFrame, category_map: pd.DataFrame,
+                            validation_result: ValidationResult, start_time: float,
+                            export_files: Dict[str, str]) -> Dict[str, Any]:
+        """최종 통계 생성"""
+        processing_time = time.time() - start_time
+        
+        return {
+            'dataset_name': self.config.dataset_name,
+            'dataset_type': self.config.dataset_type,
+            'total_valid_records': len(df),
+            'total_images': df['file_name'].nunique() if not df.empty else 0,
+            'total_categories': len(category_map),
+            'processing_time_seconds': round(processing_time, 2),
+            'invalid_counts': {
+                k: len(v) for k, v in validation_result.invalid_records.items()
+            },
+            'duplicate_removed': len(validation_result.duplicate_details),
+            'output_directory': str(self.output_path),
+            'export_files': export_files
         }
-    }
-    print_dataset_stats(stats)
     
-    return stats
-
-
-def find_image_file(image_root: str, file_name: str) -> str:
-    """
-    이미지 파일 경로 찾기 (폴더 구조에 따라 재귀 탐색)
-    
-    Args:
-        image_root: 이미지 루트 디렉토리
-        file_name: 찾을 파일명
-    
-    Returns:
-        str: 이미지 전체 경로 (없으면 None)
-    """
-    
-    # 1. 직접 경로 (기존 train set 형식)
-    direct_path = os.path.join(image_root, file_name)
-    if os.path.exists(direct_path):
-        return direct_path
-    
-    # 2. 조합 폴더 내부 (추가 데이터 형식)
-    # 파일명에서 조합 ID 추출: K-001900-010224-016551-029345_...
-    base_name = os.path.splitext(file_name)[0]
-    pattern = r'(K-[\d-]+)'
-    match = re.match(pattern, base_name)
-    
-    if match:
-        combination_id = match.group(1)
-        # 조합 폴더 안에 이미지가 있는 경우
-        folder_path = os.path.join(image_root, combination_id, file_name)
-        if os.path.exists(folder_path):
-            return folder_path
-    
-    # 3. 단일 약 폴더 내부
-    # K-022713_0_2_1_1_90_200_200.png → K-022713 폴더
-    drug_id_match = re.match(r'(K-\d+)', base_name)
-    if drug_id_match:
-        drug_id = drug_id_match.group(1)
-        single_path = os.path.join(image_root, drug_id, file_name)
-        if os.path.exists(single_path):
-            return single_path
-    
-    # 4. 재귀 탐색 (마지막 수단)
-    for root, dirs, files in os.walk(image_root):
-        if file_name in files:
-            return os.path.join(root, file_name)
-    
-    return None
-
-
-def create_yolo_format(df: pd.DataFrame, category_map: pd.DataFrame, output_dir: str):
-    """
-    YOLO 형식으로 데이터셋 생성
-    
-    Args:
-        df: 데이터셋 DataFrame
-        category_map: 카테고리 맵
-        output_dir: YOLO 출력 디렉토리
-    """
-    
-    print(f"\n   [YOLO 형식 생성]")
-    
-    # YOLO 디렉토리 구조 생성
-    images_dir = os.path.join(output_dir, "images")
-    labels_dir = os.path.join(output_dir, "labels")
-    os.makedirs(images_dir, exist_ok=True)
-    os.makedirs(labels_dir, exist_ok=True)
-    
-    # Category ID를 0부터 시작하는 인덱스로 매핑
-    category_to_idx = {row['category_id']: idx for idx, row in category_map.iterrows()}
-    
-    # 이미지별로 그룹화
-    grouped = df.groupby('file_name')
-    
-    for file_name, group in grouped:
-        # 이미지 복사
-        src_image = group.iloc[0]['image_path']
-        dst_image = os.path.join(images_dir, file_name)
+    def _print_summary(self, stats: Dict[str, Any]):
+        """최종 요약 출력"""
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("데이터셋 생성 완료")
+        self.logger.info("=" * 80)
         
-        if not os.path.exists(dst_image):
-            shutil.copy2(src_image, dst_image)
+        self.logger.info(f"데이터셋 이름: {stats['dataset_name']}")
+        self.logger.info(f"처리 시간: {stats['processing_time_seconds']}초")
+        self.logger.info(f"유효 레코드: {stats['total_valid_records']:,}개")
+        self.logger.info(f"고유 이미지: {stats['total_images']:,}개")
+        self.logger.info(f"카테고리 수: {stats['total_categories']}개")
         
-        # YOLO 라벨 파일 생성
-        label_file = os.path.splitext(file_name)[0] + '.txt'
-        label_path = os.path.join(labels_dir, label_file)
+        if any(stats['invalid_counts'].values()):
+            self.logger.info("\n제외된 레코드:")
+            for error_type, count in stats['invalid_counts'].items():
+                if count > 0:
+                    self.logger.info(f"  - {error_type}: {count:,}개")
         
-        with open(label_path, 'w') as f:
-            for _, row in group.iterrows():
-                # YOLO 형식: class_id center_x center_y width height (정규화)
-                img_w, img_h = row['width'], row['height']
-                x, y, w, h = row['bbox_x'], row['bbox_y'], row['bbox_w'], row['bbox_h']
-                
-                center_x = (x + w / 2) / img_w
-                center_y = (y + h / 2) / img_h
-                norm_w = w / img_w
-                norm_h = h / img_h
-                
-                class_idx = category_to_idx[row['category_id']]
-                
-                f.write(f"{class_idx} {center_x:.6f} {center_y:.6f} {norm_w:.6f} {norm_h:.6f}\n")
-    
-    # data.yaml 생성
-    yaml_path = os.path.join(output_dir, "data.yaml")
-    with open(yaml_path, 'w', encoding='utf-8') as f:
-        f.write(f"path: {os.path.abspath(output_dir)}\n")
-        f.write(f"train: images\n")
-        f.write(f"val: images\n\n")
-        f.write(f"nc: {len(category_map)}\n")
-        f.write(f"names:\n")
-        for idx, row in category_map.iterrows():
-            f.write(f"  {idx}: '{row['category_name']}'\n")
-    
-    print(f"      ✅ YOLO 이미지: {len(grouped)}개")
-    print(f"      ✅ YOLO 라벨: {len(grouped)}개")
-    print(f"      ✅ data.yaml: {yaml_path}")
-
-
-def print_dataset_stats(stats: Dict):
-    """데이터셋 통계 출력"""
-    
-    print("\n" + "=" * 80)
-    print("데이터셋 생성 완료")
-    print("=" * 80)
-    
-    print(f"\n📊 {stats['dataset_name']} 통계:")
-    print(f"   • 데이터셋 타입: {stats['dataset_type']}")
-    print(f"   • 유효 레코드: {stats['total_valid_records']:,}개")
-    print(f"   • 고유 이미지: {stats['total_images']:,}개")
-    print(f"   • 약 종류: {stats['total_categories']}개")
-    
-    print(f"\n❌ 제외된 레코드:")
-    for reason, count in stats['invalid_counts'].items():
-        if count > 0:
-            print(f"   • {reason}: {count}개")
-    
-    print(f"\n💾 출력 파일:")
-    print(f"   • 데이터셋: {stats['files']['dataset_csv']}")
-    print(f"   • 카테고리: {stats['files']['category_csv']}")
-    print(f"   • 무효 보고서: {stats['files']['invalid_report']}")
-    
-    print("\n" + "=" * 80)
+        self.logger.info(f"\n출력 디렉터리: {stats['output_directory']}")
+        self.logger.info("=" * 80)
 
 
 # 사용 예시
-
 if __name__ == "__main__":
+    # Windows 환경에서 multiprocessing 사용 시 필요
+    from multiprocessing import freeze_support
+    freeze_support()
     
-    # # ===== 기존 Train Set =====
-    # print("\n### 기존 Train Set 데이터셋 생성 ###\n")
-    # original_stats = create_training_dataset(
-    #     label_root=r"E:\download\sprint_ai_project1_data\train_annotations",
-    #     image_root=r"E:\download\sprint_ai_project1_data\train_images",
-    #     output_dir=r"E:\download\datasets",
-    #     dataset_name="original_trainset",
-    #     dataset_type="combination",
-    #     exclude_index_images=False
-    # )
-    
-    # # ===== 추가 데이터 - 조합 =====
-    # print("\n### TS_1 조합 데이터셋 생성 ###\n")
-    # ts8_stats = create_training_dataset(
-    #     label_root=r"E:\download\label\경구약제조합_5000종\TL_1_조합",
-    #     image_root=r"E:\download\image\경구약제조합_5000종\TS_1_조합",
-    #     output_dir=r"E:\download\datasets",
-    #     dataset_name="TS_8_combination",
-    #     dataset_type="combination",
-    #     exclude_index_images=True
-    # )
-    
-    # ===== 추가 데이터 - 단일 =====
-    print("\n### TS_81 단일 데이터셋 생성 ###\n")
-    ts10_stats = create_training_dataset(
-        label_root=r"E:\download\label\단일경구약제_5000종\TL_81_단일",
-        image_root=r"E:\download\image\단일경구약제_5000종\TS_81_단일",
+    # 설정 생성
+    config = DatasetConfig(
+        label_root=r"E:\download\label_aug",
+        image_root=r"E:\download\train_aug",
         output_dir=r"E:\download\datasets",
-        dataset_name="TS_10_single",
-        dataset_type="single",
-        exclude_index_images=False
+        dataset_name="train_plus_extra_refined",
+        dataset_type="combination",
+        gci_path=r"E:\download\global_category_index(aug_comb_whole,refined)\global_category_index_updated.json",
+        exclude_index_images=True,
+        max_workers=4  # CPU 코어 수에 맞춰 조정
     )
+    
+    
+    # 데이터셋 생성
+    generator = DatasetGenerator(config)
+    stats = generator.generate()
