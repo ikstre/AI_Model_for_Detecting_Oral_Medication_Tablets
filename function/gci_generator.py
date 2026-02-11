@@ -416,69 +416,68 @@ def build_range_paths(base_dir, prefix, suffix, start, end, exclude=None):
     return paths
 
 
-# if __name__ == "__main__":
-#     freeze_support()
-
-#     ROOT = Path(r"E:\download")
-#     TRAIN_ANN = ROOT / "sprint_ai_project1_data" / "train_annotations"
-#     # COMB_BASE = ROOT / "label" / "경구약제조합_5000종"
-#     # SINGLE_BASE = ROOT / "label" / "단일경구약제_5000종"
-
-#     annotation_dirs = []
-#     # annotation_dirs.append(str(TRAIN_ANN))
-    
-#     # # 조합
-#     # annotation_dirs += build_range_paths(COMB_BASE, "TL", "조합", 1, 8, exclude=[2])
-#     # annotation_dirs.append(str(COMB_BASE / "VL_1_조합"))
-    
-#     # # 단일
-#     # annotation_dirs += build_range_paths(SINGLE_BASE, "VL", "단일", 1, 10)
-#     # annotation_dirs += build_range_paths(SINGLE_BASE, "TL", "단일", 1, 81)
-
-#     builder = GCIBuilder(
-#         annotation_dirs=annotation_dirs,
-#         output_dir=str(ROOT / "global_category_index(train_set_56)")
-#     )
-
-#     gci = builder.run()
-
-#     print("\n✅ GCI 생성 완료!")
-#     print(f"📁 저장 위치: {builder.output_dir}")
-#     print(f"📊 총 데이터셋: {len(annotation_dirs)}개")
-
-
 if __name__ == "__main__":
-    from multiprocessing import freeze_support
     freeze_support()
 
     ROOT = Path(r"E:\download")
-    
-    # 📍 TL2 조합의 정확한 경로 설정
-    # 주신 경로: E:\download\download\166.약품식별_인공지능_개발을_위한_경구약제_이미지_데이터\01.데이터\1.Training\원천데이터\경구약제조합_5000종\TL_2_조합
-    # (주의: 경로 내 '원천데이터'라고 적어주셨는데, GCI는 JSON 파일이 있는 '라벨링데이터' 폴더를 바라봐야 합니다!)
-    
-    # 만약 JSON이 들어있는 폴더가 '라벨링데이터' 하위에 있다면 경로를 그쪽으로 잡아주세요.
-    TL2_PATH = ROOT / "download" / "166.약품식별_인공지능_개발을_위한_경구약제_이미지_데이터" / "01.데이터" / "1.Training" / "원천데이터" / "경구약제조합_5000종" / "TL_2_조합"
+    TRAIN_ANN = ROOT / "label_aug" / "train_annotations"
+    COMB_BASE = ROOT / "label_aug"
+    # SINGLE_BASE = ROOT / "label" / "단일경구약제_5000종"
 
-    # 만약 주신 경로(원천데이터 하위)에 JSON이 같이 있다면 아래를 사용하세요.
-    # TL2_PATH = Path(r"E:\download\download\166.약품식별_인공지능_개발을_위한_경구약제_이미지_데이터\01.데이터\1.Training\원천데이터\경구약제조합_5000종\TL_2_조합")
-
-    annotation_dirs = [str(TL2_PATH)]
-
-    # 📁 결과 저장 폴더명 변경 (비교를 위해 구분함)
-    output_folder_name = "global_category_index_TL2_Only"
+    annotation_dirs = []
+    annotation_dirs.append(str(TRAIN_ANN))
     
+    # 조합
+    annotation_dirs += build_range_paths(COMB_BASE, "TL", "조합", 1, 8, exclude=[2])
+    annotation_dirs.append(str(COMB_BASE / "VL_1_조합"))
+    
+    # # 단일
+    # annotation_dirs += build_range_paths(SINGLE_BASE, "VL", "단일", 1, 10)
+    # annotation_dirs += build_range_paths(SINGLE_BASE, "TL", "단일", 1, 81)
+
     builder = GCIBuilder(
         annotation_dirs=annotation_dirs,
-        output_dir=str(ROOT / output_folder_name)
+        output_dir=str(ROOT / "global_category_index(aug_comb_whole,refined)")
     )
 
     gci = builder.run()
 
-    print("\n✅ TL2 전용 GCI 분석 완료!")
+    print("\n✅ GCI 생성 완료!")
     print(f"📁 저장 위치: {builder.output_dir}")
-    print(f"📊 분석 대상: {annotation_dirs[0]}")
+    print(f"📊 총 데이터셋: {len(annotation_dirs)}개")
+
+
+# if __name__ == "__main__":
+#     from multiprocessing import freeze_support
+#     freeze_support()
+
+#     ROOT = Path(r"E:\download")
     
-    # 🔍 결과 요약 출력 (몇 종인지 바로 확인)
-    num_classes = len(gci.get('index_to_id', {}))
-    print(f"🧐 TL2 내 발견된 카테고리 수: {num_classes}개")
+#     # 📍 TL2 조합의 정확한 경로 설정
+#     # 주신 경로: E:\download\download\166.약품식별_인공지능_개발을_위한_경구약제_이미지_데이터\01.데이터\1.Training\원천데이터\경구약제조합_5000종\TL_2_조합
+    
+#     # 만약 JSON이 들어있는 폴더가 '라벨링데이터' 하위에 있다면 경로를 그쪽으로 잡아주세요.
+#     TL2_PATH = ROOT / "download" / "166.약품식별_인공지능_개발을_위한_경구약제_이미지_데이터" / "01.데이터" / "1.Training" / "원천데이터" / "경구약제조합_5000종" / "TL_2_조합"
+
+#     # 만약 주신 경로(원천데이터 하위)에 JSON이 같이 있다면 아래를 사용하세요.
+#     # TL2_PATH = Path(r"E:\download\download\166.약품식별_인공지능_개발을_위한_경구약제_이미지_데이터\01.데이터\1.Training\원천데이터\경구약제조합_5000종\TL_2_조합")
+
+#     annotation_dirs = [str(TL2_PATH)]
+
+#     # 📁 결과 저장 폴더명 변경 (비교를 위해 구분함)
+#     output_folder_name = "global_category_index_TL2_Only"
+    
+#     builder = GCIBuilder(
+#         annotation_dirs=annotation_dirs,
+#         output_dir=str(ROOT / output_folder_name)
+#     )
+
+#     gci = builder.run()
+
+#     print("\n✅ TL2 전용 GCI 분석 완료!")
+#     print(f"📁 저장 위치: {builder.output_dir}")
+#     print(f"📊 분석 대상: {annotation_dirs[0]}")
+    
+#     # 🔍 결과 요약 출력 (몇 종인지 바로 확인)
+#     num_classes = len(gci.get('index_to_id', {}))
+#     print(f"🧐 TL2 내 발견된 카테고리 수: {num_classes}개")
