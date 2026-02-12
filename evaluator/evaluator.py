@@ -463,9 +463,9 @@ def evaluate(pred_csv_path: str, gt_csv_path: str, output_txt_path: str = None, 
     }
 
 if __name__ == "__main__":
-    PRED_CSV = r"E:\download\submission_eval\submission_eval(0.984).csv"
+    PRED_CSV = r"E:\download\submission_eval\submission_eval(0.888).csv"
     GT_CSV = r"E:\download\submission_eval\ground_truth.csv"
-    OUTPUT_TXT = r"E:\download\submission_eval\mAP_75_95_detailed(0.984).txt"
+    OUTPUT_TXT = r"E:\download\submission_eval\mAP_75_95_detailed(0.888).txt"
     GCI_JSON = r"E:\download\global_category_index(train_set_56)\global_category_index.json"  # 선택사항
     
     results = evaluate(
