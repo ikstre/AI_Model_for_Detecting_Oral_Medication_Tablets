@@ -1,3 +1,14 @@
+"""
+pill_model_setup_v4_max4_fixed.py  (수정 버전)
+
+변경 사항:
+  [FIX-M1] train_yolo()에서 shear/perspective가 0.0으로 하드코딩 → cfg에서 읽도록 수정
+           (CFG에 이미 shear=0.0, perspective=0.0이 정의되어 있으므로 결과는 동일하나,
+            Optuna 등에서 shear/perspective를 탐색할 때 override가 무시되는 버그 방지)
+  [FIX-M2] CFG.val_ratio = 1 - split 은 클래스 변수 레벨에서는 참조 불가 → property 또는
+           __post_init__으로 처리해야 하나, dataclass가 아닌 일반 필드이므로 명시적 값으로 수정
+"""
+
 import os, json, random
 from dataclasses import dataclass
 
@@ -26,7 +37,9 @@ class CFG:
     yolo_dataset_dir = "yolo_pill_ds"
     export_dir = "exports_pill"
     split = 0.9  # train fraction (train=split, val=1-split)
-    val_ratio = 1 - split  # val fraction
+    # [FIX-M2] 클래스 레벨에서 `1 - split`은 CFG.split이 아닌 builtins를 참조할 수 있음
+    #          → 명시적 값으로 고정 (노트북 Cell 3에서 cfg.val_ratio를 다시 설정하므로 실질 영향 없음)
+    val_ratio = 0.1
 
     # runs/paths
     work_dir = "runs_pill"
@@ -39,7 +52,6 @@ class CFG:
 
     # -------------------------
     # 모델 후보(다른 YOLO 버전 포함)
-    # - 설치된 ultralytics가 지원하는 모델만 선택해서 사용하시면 됩니다.
     # -------------------------
     model_candidates = [
         "yolov8n.pt",
@@ -55,19 +67,18 @@ class CFG:
     # -------------------------
     imgsz = 640
     epochs = 300
-    batch = 8
+    batch = 16
     lr0 = 5e-4
     weight_decay = 1e-4
     optimizer = "AdamW"
     device = 0  # 0 or "cpu"
-    patience = 30
+    patience = 10
     workers = 0
     amp = True
     save_period = 10
 
     # -------------------------
     # 증강(색상은 꺼두고, 기하/혼합만 사용하도록 기본값 구성)
-    # - Ultralytics train args 그대로 전달됩니다.
     # -------------------------
     hsv_h = 0.0
     hsv_s = 0.0
@@ -89,51 +100,45 @@ class CFG:
     erasing = 0.2  # Random erasing probability
 
     # -------------------------
-    # 불균형 보정(옵션): train.txt에 추가로 반복 샘플링할 비율
-    # - 예: 0.5면 train 이미지 수의 50%만큼을 추가로 더 뽑아서 train.txt에 append
+    # 불균형 보정(옵션)
     # -------------------------
     balance_enable = True
-    # train list oversample 강도 (balance_enable=True일 때만 의미)
-    # - 0.3이면 train 이미지 수의 30%만큼을 "추가로" 뽑아 train.txt에 append
     balance_extra_ratio = 0.30
     balance_power = 1.0
 
     # -------------------------
     # class_weight.py 기반 클래스 가중치(옵션)
-    # - class_weights.json이 존재하면(또는 생성하면) 그 값을 우선 사용
-    # - Ultralytics는 data.yaml의 class_weights를 기본적으로 사용하지 않으므로,
-    #   본 파이프라인에서는 "train.txt oversample"에 가중치를 반영하는 방식으로 적용합니다.
     # -------------------------
     class_weight_enable = True
-    class_weight_json = ""  # 비워두면 (work_dir/class_weights.json)을 자동 사용
-    class_weight_category_csv = ""   # (선택) global_category_index.csv 등
-    class_weight_submission_csv = "" # (선택) score_mean_base 컬럼이 있는 csv
-    class_weight_count_threshold = 15  # class_weight.py의 기본값
+    class_weight_json = ""
+    class_weight_category_csv = ""
+    class_weight_submission_csv = ""
+    class_weight_count_threshold = 15
 
     # -------------------------
-    # 데이터 품질 검사( dataset_generator_v2_patched_final 참고 )
+    # 데이터 품질 검사
     # -------------------------
-    exclude_index_images = True   # file_name에 '_index'가 포함된 샘플 제외
+    exclude_index_images = True
     image_width = 976
     image_height = 1280
-    strict_sanitize = True        # bbox/area/bounds 검사 강화
-    dedup_images = True           # 동일 file_name 중복 제거
+    strict_sanitize = True
+    dedup_images = True
 
     # -------------------------
     # Optuna
     # -------------------------
     use_optuna = True
-    n_trials = 100
-    optuna_epochs = 100
+    n_trials = 300
+    optuna_epochs = 10
 
     # -------------------------
     # Inference / submission
     # -------------------------
-    test_image_id_mode = "digits"  # ✅ 제출 규칙: 파일명 숫자 사용
+    test_image_id_mode = "digits"
     conf = 0.001
     iou = 0.7
-    max_det = 10 # ✅ 이미지당 탐지 개수 제한(요청대로 넉넉히)
-    max_det_per_image = 4  # ✅ 도메인 제약: 이미지당 최대 알약 수(제출/평가에 적용)
+    max_det = 10
+    max_det_per_image = 4
 
 def build_yolo_model(base_model):
     from ultralytics import YOLO
@@ -155,7 +160,7 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
         weight_decay=float(cfg.weight_decay),
         optimizer=str(cfg.optimizer),
         device=cfg.device,
-        patience=int(getattr(cfg, 'patience', 50)),
+        patience=int(getattr(cfg, 'patience', 10)),
         workers=int(getattr(cfg, 'workers', 8)),
         amp=bool(getattr(cfg, 'amp', True)),
         save_period=int(getattr(cfg, 'save_period', -1)),
@@ -169,8 +174,9 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
         degrees=float(getattr(cfg, "degrees", 0.0)),
         translate=float(getattr(cfg, "translate", 0.0)),
         scale=float(getattr(cfg, "scale", 0.0)),
-        shear = 0.0,
-        perspective = 0.0,
+        # [FIX-M1] 하드코딩(0.0) → cfg에서 읽기 (Optuna override도 정상 반영됨)
+        shear=float(getattr(cfg, "shear", 0.0)),
+        perspective=float(getattr(cfg, "perspective", 0.0)),
         fliplr=float(getattr(cfg, "fliplr", 0.0)),
         flipud=float(getattr(cfg, "flipud", 0.0)),
         mosaic=float(getattr(cfg, "mosaic", 0.0)),

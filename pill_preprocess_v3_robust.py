@@ -1,3 +1,12 @@
+"""
+pill_preprocess_v3_robust.py  (수정 버전)
+
+변경 사항:
+  [FIX-P1] 파일 하단의 중복 `import re` / `from pathlib import Path` 제거 (L1에서 이미 import)
+  [FIX-P2] parse_test_image_id: mode=="digits" 블록과 else 블록이 완전 동일 → else 제거, digits를 기본 fallback으로 통합
+  [FIX-P3] resolve_image_path에 image_index(재귀 스캔 결과) 지원 추가 → 노트북에서 별도 함수 재정의할 필요 없음
+"""
+
 import os, json, re, random, shutil
 from pathlib import Path
 
@@ -146,18 +155,50 @@ def build_cat_maps(coco):
     return catid_to_yolo, yolo_to_catid, catid_to_name
 
 
-def resolve_image_path(train_img_dir, file_name):
-    # Windows + macOS 혼용: Path로 정규화
+# [FIX-P3] image_index 파라미터 추가 → 노트북에서 별도 resolve_train_image_path 재정의 불필요
+def resolve_image_path(train_img_dir, file_name, *, image_index=None, yolo_img_dir=None):
+    """
+    file_name → 실제 이미지 경로를 찾습니다.
+    우선순위:
+      0) 이미 절대/상대 경로로 존재하면 그대로
+      1) yolo_img_dir (YOLO export된 images/) 에서 탐색
+      2) image_index (원본 이미지 root 재귀 스캔 dict: {basename: abs_path})
+      3) train_img_dir 직하위
+      4) 확장자 fallback
+    """
     file_name = str(file_name).replace("\\", "/")
-    p = Path(train_img_dir) / Path(file_name).name
+    p = Path(file_name)
+
+    # 0) 이미 존재하는 경로
     if p.exists():
         return p
 
-    stem = Path(file_name).stem
+    basename = p.name
+    stem = p.stem
+
+    # 1) YOLO export images 폴더
+    if yolo_img_dir is not None:
+        cand = Path(yolo_img_dir) / basename
+        if cand.exists():
+            return cand
+
+    # 2) image_index (재귀 스캔 결과)
+    if isinstance(image_index, dict):
+        s = image_index.get(basename)
+        if s and Path(s).exists():
+            return Path(s)
+
+    # 3) train_img_dir 직하위
+    cand = Path(train_img_dir) / basename
+    if cand.exists():
+        return cand
+
+    # 4) 확장자 fallback
     for ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp"]:
         q = Path(train_img_dir) / (stem + ext)
         if q.exists():
             return q
+
     return None
 
 def coco_bbox_to_yolo_xywhn(b, img_w, img_h, clip=True, eps=1e-6):
@@ -413,9 +454,9 @@ def build_train_like_image_id_map(file_names, start_id=1):
         cur += 1
     return m
 
-import re
-from pathlib import Path
+# [FIX-P1] 중복 import 제거됨 (파일 상단에서 이미 import re, from pathlib import Path)
 
+# [FIX-P2] mode=="digits" 블록과 else fallback이 완전히 동일했으므로, digits를 기본 fallback으로 통합
 def parse_test_image_id(path, mode="train_like", seq_id=None, id_map=None, start_id=1):
     path = Path(path)
     fn = path.name
@@ -428,19 +469,11 @@ def parse_test_image_id(path, mode="train_like", seq_id=None, id_map=None, start
     if mode == "sequential":
         return int(seq_id)
 
-    # ✅ 명시적으로 추가 (기존 else 동작과 동일)
-    if mode == "digits":
-        nums = re.findall(r"\d+", path.stem)
-        if not nums:
-            return _safe_int(path.stem) or int(seq_id)
-        return int("".join(nums))
-
-    # 기존 코드 호환: digits 외 다른 문자열도 digits처럼 처리하고 싶다면
+    # mode == "digits" 또는 기타 모든 경우 → 파일명에서 숫자 추출
     nums = re.findall(r"\d+", path.stem)
     if not nums:
         return _safe_int(path.stem) or int(seq_id)
     return int("".join(nums))
-
 
 
 def diagnose_yolo_dataset(data_yaml_path, n_check=5):
