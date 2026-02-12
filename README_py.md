@@ -113,8 +113,17 @@ project_root/
 ├── label_aug/                   # 어노테이션 파일
 │   ├── train_annotations/
 │   ├── TL_1_조합/
-│   └── ...
+│   ├── TL_3_조합/
+│   ├── TL_4_조합/
+│   ├── TL_5_조합/
+│   └── VL_1_조합/
 ├── train_aug/                   # 학습 이미지
+│   ├── train_images/
+│   ├── TS_1_조합/
+│   ├── TS_3_조합/
+│   ├── TS_4_조합/
+│   ├── TS_5_조합/
+│   └── VS_1_조합/
 └── sprint_ai_project1_data/     # 테스트 데이터
     └── test_images/
 ```
