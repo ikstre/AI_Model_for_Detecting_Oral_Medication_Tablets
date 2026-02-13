@@ -9,6 +9,9 @@
 ## 협업일지 링크
 https://www.notion.so/4231e9d21f0e4eef92ed2adb231ca085?v=75ec033e7b49459e984e101424d40fd1
 
+## 보고서 링크
+https://docs.google.com/document/d/1P0wwp4s0XAxsJmcWKgvyQ3pdjkpkFyCZ/edit?usp=drive_link&ouid=107156597373944303905&rtpof=true&sd=true
+
 ---
 
 ## 문서 안내 (메인/서브 + EDA)
