@@ -521,7 +521,7 @@ MemoryError: Unable to allocate array
 
 **해결 방법:**
 
-- 워커 수 감소: `max_workers=2`
+- 워커 수 감소: `max_workers=0`
 - 더 작은 청크로 데이터 처리: `chunk_size=100`
 - 모든 데이터 로드 대신 데이터 스트리밍 활성화
 
