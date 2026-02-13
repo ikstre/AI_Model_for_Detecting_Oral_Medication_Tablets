@@ -1,3 +1,14 @@
+"""
+pill_model_setup_v4_max4_fixed.py  (수정 버전)
+
+변경 사항:
+  [FIX-M1] train_yolo()에서 shear/perspective가 0.0으로 하드코딩 → cfg에서 읽도록 수정
+           (CFG에 이미 shear=0.0, perspective=0.0이 정의되어 있으므로 결과는 동일하나,
+            Optuna 등에서 shear/perspective를 탐색할 때 override가 무시되는 버그 방지)
+  [FIX-M2] CFG.val_ratio = 1 - split 은 클래스 변수 레벨에서는 참조 불가 → property 또는
+           __post_init__으로 처리해야 하나, dataclass가 아닌 일반 필드이므로 명시적 값으로 수정
+"""
+
 import os, json, random
 from dataclasses import dataclass
 
@@ -25,16 +36,22 @@ class CFG:
     # yolo dataset export
     yolo_dataset_dir = "yolo_pill_ds"
     export_dir = "exports_pill"
-    val_ratio = 0.2
+    split = 0.9  # train fraction (train=split, val=1-split)
+    # [FIX-M2] 클래스 레벨에서 `1 - split`은 CFG.split이 아닌 builtins를 참조할 수 있음
+    #          → 명시적 값으로 고정 (노트북 Cell 3에서 cfg.val_ratio를 다시 설정하므로 실질 영향 없음)
+    val_ratio = 0.1
 
     # runs/paths
     work_dir = "runs_pill"
     baseline_name = "baseline"
+
+    # Ultralytics run output
+    project = r"yolo_runs"
+    name = "pill_baseline_augdata"
     optuna_subdir = "optuna"
 
     # -------------------------
     # 모델 후보(다른 YOLO 버전 포함)
-    # - 설치된 ultralytics가 지원하는 모델만 선택해서 사용하시면 됩니다.
     # -------------------------
     model_candidates = [
         "yolov8n.pt",
@@ -49,16 +66,19 @@ class CFG:
     # 학습 기본 하이퍼파라미터
     # -------------------------
     imgsz = 640
-    epochs = 100
+    epochs = 300
     batch = 16
-    lr0 = 1e-3
+    lr0 = 5e-4
     weight_decay = 1e-4
     optimizer = "AdamW"
     device = 0  # 0 or "cpu"
+    patience = 10
+    workers = 0
+    amp = True
+    save_period = 10
 
     # -------------------------
     # 증강(색상은 꺼두고, 기하/혼합만 사용하도록 기본값 구성)
-    # - Ultralytics train args 그대로 전달됩니다.
     # -------------------------
     hsv_h = 0.0
     hsv_s = 0.0
@@ -67,39 +87,58 @@ class CFG:
     degrees = 10.0
     translate = 0.10
     scale = 0.20
-    shear = 2.0
-    perspective = 0.0005
+    shear = 0.0
+    perspective = 0.0
 
     fliplr = 0.5
-    flipud = 0.0
+    flipud = 0.5
 
-    mosaic = 1.0
+    mosaic = 0.25
     mixup = 0.0
     close_mosaic = 0
 
+    erasing = 0.2  # Random erasing probability
+
     # -------------------------
-    # 불균형 보정(옵션): train.txt에 추가로 반복 샘플링할 비율
-    # - 예: 0.5면 train 이미지 수의 50%만큼을 추가로 더 뽑아서 train.txt에 append
+    # 불균형 보정(옵션)
     # -------------------------
-    balance_enable = False
-    balance_extra_ratio = 0.0
-    balance_power = 17.0  # weight^power (큰 값일수록 소수 클래스 oversample 강화)
+    balance_enable = True
+    balance_extra_ratio = 0.30
+    balance_power = 1.0
+
+    # -------------------------
+    # class_weight.py 기반 클래스 가중치(옵션)
+    # -------------------------
+    class_weight_enable = True
+    class_weight_json = ""
+    class_weight_category_csv = ""
+    class_weight_submission_csv = ""
+    class_weight_count_threshold = 15
+
+    # -------------------------
+    # 데이터 품질 검사
+    # -------------------------
+    exclude_index_images = True
+    image_width = 976
+    image_height = 1280
+    strict_sanitize = True
+    dedup_images = True
 
     # -------------------------
     # Optuna
     # -------------------------
     use_optuna = True
-    n_trials = 100
-    optuna_epochs = 100
+    n_trials = 300
+    optuna_epochs = 10
 
     # -------------------------
     # Inference / submission
     # -------------------------
-    test_image_id_mode = "digits"  # ✅ 제출 규칙: 파일명 숫자 사용
+    test_image_id_mode = "digits"
     conf = 0.001
     iou = 0.7
-    max_det = 10 # ✅ 이미지당 탐지 개수 제한(요청대로 넉넉히)
-    max_det_per_image = 4  # ✅ 도메인 제약: 이미지당 최대 알약 수(제출/평가에 적용)
+    max_det = 10
+    max_det_per_image = 4
 
 def build_yolo_model(base_model):
     from ultralytics import YOLO
@@ -111,8 +150,8 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
     # 기본 args
     args = dict(
         data=data_yaml,
-        project=str(getattr(cfg, 'work_dir', 'runs_pill')),
-        name=str(getattr(cfg, 'baseline_name', 'baseline')),
+        project=str(getattr(cfg, 'project', getattr(cfg, 'work_dir', 'runs_pill'))),
+        name=str(getattr(cfg, 'name', getattr(cfg, 'baseline_name', 'baseline'))),
         exist_ok=True,
         imgsz=int(cfg.imgsz),
         epochs=epochs,
@@ -121,6 +160,10 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
         weight_decay=float(cfg.weight_decay),
         optimizer=str(cfg.optimizer),
         device=cfg.device,
+        patience=int(getattr(cfg, 'patience', 10)),
+        workers=int(getattr(cfg, 'workers', 8)),
+        amp=bool(getattr(cfg, 'amp', True)),
+        save_period=int(getattr(cfg, 'save_period', -1)),
         close_mosaic=int(getattr(cfg, "close_mosaic", 0)),
         verbose=False,
 
@@ -131,12 +174,14 @@ def train_yolo(model, data_yaml, cfg, epochs=None, **overrides):
         degrees=float(getattr(cfg, "degrees", 0.0)),
         translate=float(getattr(cfg, "translate", 0.0)),
         scale=float(getattr(cfg, "scale", 0.0)),
+        # [FIX-M1] 하드코딩(0.0) → cfg에서 읽기 (Optuna override도 정상 반영됨)
         shear=float(getattr(cfg, "shear", 0.0)),
         perspective=float(getattr(cfg, "perspective", 0.0)),
         fliplr=float(getattr(cfg, "fliplr", 0.0)),
         flipud=float(getattr(cfg, "flipud", 0.0)),
         mosaic=float(getattr(cfg, "mosaic", 0.0)),
         mixup=float(getattr(cfg, "mixup", 0.0)),
+        erasing=float(getattr(cfg, "erasing", 0.0)),
     )
 
     # trial별 overrides

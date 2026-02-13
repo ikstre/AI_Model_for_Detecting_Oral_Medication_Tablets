@@ -140,17 +140,17 @@ def run_infer_to_csv(
     print(f"- 총 탐지: {total_det}")
 
 if __name__ == "__main__":
-    WEIGHTS = r"C:\Users\chocy\AI_07_basic\runs\detect\runs\detect\pill_stage2_finetune\weights\best.pt"
+    WEIGHTS = r"E:\yolo_runs\pill_baseline_augdata2\weights\best.pt"
     TEST_DIR = r"E:\download\sprint_ai_project1_data\test_images"
-    OUT_CSV  = r"E:\download\submission\submission(basemodel).csv"
-    GCI_JSON = r"E:\download\global_category_index(train_set_56)\global_category_index.json"
+    OUT_CSV  = r"E:\download\submission\submission(aug_sort).csv"
+    GCI_JSON = r"E:\download\gci_57_MODEL_SORTED_BY_CATEGORY_ID.json"
 
     run_infer_to_csv(
         weights_path=WEIGHTS,
         test_img_dir=TEST_DIR,
         out_csv_path=OUT_CSV,
         gci_json_path=GCI_JSON,
-        imgsz=512,
+        imgsz=640,
         pred_batch=4,
         chunk_size=200,
         half=True,

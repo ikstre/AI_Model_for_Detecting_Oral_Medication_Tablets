@@ -540,8 +540,8 @@ def save_quality_report(results, output_path="json_quality_report.txt"):
 
 if __name__ == "__main__":
     # 경로 설정
-    LABEL_DIR = r"E:\download\sprint_ai_project1_data\train_annotations"
-    IMAGE_DIR = r"E:\download\sprint_ai_project1_data\train_images"
+    LABEL_DIR = r"C:\Users\TAEHO\Desktop\AI_07_basic\data\train_annotations"
+    IMAGE_DIR = r"C:\Users\TAEHO\Desktop\AI_07_basic\data\train_images"
     
     # 1. JSON 파일 누락 검증
     print("\n🔍 1단계: JSON 파일 누락 검증")
