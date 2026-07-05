@@ -80,7 +80,7 @@ jupyter lab
 
 ## 디렉토리 핵심 구조 (상세)
 ```text
-AI_07_basic/
+Main/
 ├── README.md
 ├── README_py.md                      # function 메인 파이프라인 문서
 ├── README_IPYNB.md                   # 메인 notebook 파이프라인 문서
